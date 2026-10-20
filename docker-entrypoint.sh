@@ -210,7 +210,10 @@ if [ -n "$SERVER_DOMAIN" ] && [ "$SERVER_DOMAIN" != "localhost" ]; then
     ) &
 fi
 
-# --- Start NOALBS ---
+# --- Start Failover Manager & NOALBS ---
+echo "Starting Failover Manager background process..."
+python3 /app/failover_manager.py 2>&1 | tee -a /tmp/failover_manager.log &
+
 if [ "$(echo "${NOALBS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
     echo "Starting NOALBS background process..."
     python3 /app/noalbs/noalbs.py 2>&1 | tee -a /tmp/noalbs.log &

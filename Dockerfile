@@ -76,9 +76,11 @@ COPY chat.html /usr/local/nginx/html/chat.html
 # 5. App scripts and configuration (layer caching ensures updates rebuild in <1s)
 COPY nginx/nginx.conf.template /etc/nginx/nginx.conf.template
 COPY stream_validator.py /app/stream_validator.py
+COPY failover_manager.py /app/failover_manager.py
 COPY update_titles.py /app/update_titles.py
 COPY tiktok_pusher.py /app/tiktok_pusher.py
 COPY test_noalbs.py /app/test_noalbs.py
+COPY test_failover.py /app/test_failover.py
 COPY noalbs /app/noalbs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

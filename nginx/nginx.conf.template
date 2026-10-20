@@ -205,12 +205,26 @@ rtmp {
         drop_idle_publisher 10s;
         deny play all;
 
-        # Generic live application
+        # Generic live application (Ingest)
         application ${APP_NAME} {
             live on;
             record off;
             on_publish http://127.0.0.1:8082/validate?key=$name;
             on_publish_done http://127.0.0.1:8082/publish_done;
+        }
+
+        # Vertical application (Ingest)
+        application vertical {
+            live on;
+            record off;
+            on_publish http://127.0.0.1:8082/validate?key=$name;
+            on_publish_done http://127.0.0.1:8082/publish_done;
+        }
+
+        # Continuous Relay application (Destinations Push)
+        application relay {
+            live on;
+            record off;
 
             #youtube
             #facebook
@@ -225,12 +239,10 @@ rtmp {
             #rtmp3
         }
 
-        # Vertical application
-        application vertical {
+        # Continuous Vertical Relay application (Destinations Push)
+        application vertical_relay {
             live on;
             record off;
-            on_publish http://127.0.0.1:8082/validate?key=$name;
-            on_publish_done http://127.0.0.1:8082/publish_done;
 
             #v_youtube
             #v_facebook
