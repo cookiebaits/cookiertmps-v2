@@ -3,7 +3,7 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /app
 COPY package.json tsconfig.json vite.config.ts index.html chat.html ./
 COPY src ./src
-RUN npm install --omit=dev --no-audit --no-fund 2>/dev/null || npm install
+RUN npm install
 RUN npm run build
 
 # Stage 2: Streamlined Runtime Container
