@@ -21,7 +21,7 @@ RUN apt-get update && \
         certbot \
         python3 \
         python3-pip \
-        libpcre3-dev \
+        libpcre2-dev \
         zlib1g-dev && \
     pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python && \
     apt-get clean && \
@@ -96,7 +96,7 @@ ENV APP_NAME=live
 ENV CHUNK_SIZE=8192
 
 WORKDIR /app
-EXPOSE 1935 80 8080 8081 8443
+EXPOSE 1935 80 8081 8443
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
