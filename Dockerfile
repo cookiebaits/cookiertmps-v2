@@ -7,28 +7,22 @@ RUN npm install --omit=dev --no-audit --no-fund 2>/dev/null || npm install
 RUN npm run build
 
 # Stage 2: Streamlined Runtime Container
-FROM debian:bookworm-slim
+FROM buildpack-deps:trixie
 
 ENV NGINX_VERSION=nginx-1.30.3
 ENV NGINX_RTMP_MODULE_VERSION=cookie-nginx-rtmp
 
-# 1. Essential system packages and slim Python runtime (cut down from 30+ to only essentials)
+# 1. Essential system packages and slim Python runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates \
-        openssl \
-        libssl-dev \
         stunnel4 \
         gettext \
         ffmpeg \
+        certbot \
         python3 \
         python3-pip \
-        gcc \
-        make \
-        libc6-dev \
         libpcre3-dev \
-        zlib1g-dev \
-        wget && \
+        zlib1g-dev && \
     pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -54,7 +48,9 @@ RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
         --with-stream_ssl_module \
         --with-stream_ssl_preread_module \
         --with-threads \
+        --with-cc-opt="-Wno-error" \
         --add-module=/tmp/build/cookie-nginx-rtmp && \
+    sed -i 's/-Werror//g' objs/Makefile && \
     make -j $(getconf _NPROCESSORS_ONLN) CFLAGS="-Wno-error" && \
     make install && \
     cp /tmp/build/cookie-nginx-rtmp/stat.xsl /usr/local/nginx/html/stat.xsl && \
