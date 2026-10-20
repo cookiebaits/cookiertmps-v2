@@ -124,15 +124,8 @@ def run_update_titles():
 @app.route('/validate', methods=['POST'])
 def validate():
     raw_data = request.get_data(as_text=True)
-    parsed_data = parse_qs(raw_data) if raw_data else {}
-    stream_key_attempt = (
-        request.form.get('name') or
-        request.args.get('key') or
-        request.args.get('name') or
-        (parsed_data.get('name') and parsed_data.get('name')[0]) or
-        (parsed_data.get('key') and parsed_data.get('key')[0]) or
-        ''
-    )
+    parsed_data = parse_qs(raw_data)
+    stream_key_attempt = parsed_data.get('name', [''])[0]
 
     # Robust client IP extraction for WireGuard, VPN, and proxy setups
     client_ip = (
