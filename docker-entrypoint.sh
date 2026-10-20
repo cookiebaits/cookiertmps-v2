@@ -16,13 +16,13 @@ VALIDATOR_CHECK_INTERVAL_SECONDS=0.2 # Check every 200ms
 echo "Starting stream key validation server..."
 # Start Gunicorn in the background to run the Flask app
 # -w 1: Use a single worker process (sufficient for this task)
-# -b 127.0.0.1:8080: Bind to the same internal host and port
+# -b 127.0.0.1:8082: Bind to the internal validator host and port
 # --log-level info: Set the log level
 # stream_validator:app: Point to the 'app' object in your python file
 export PYTHONPATH=$PYTHONPATH:/app
 gunicorn \
     --workers 1 \
-    --bind 127.0.0.1:8080 \
+    --bind 127.0.0.1:8082 \
     --log-level info \
     --access-logfile "$VALIDATOR_LOG" \
     --error-logfile "$VALIDATOR_LOG" \
@@ -42,7 +42,7 @@ CURRENT_ATTEMPT=0
 while [ $CURRENT_ATTEMPT -lt $MAX_ATTEMPTS ]; do
     # Check if process exists AND responds to health check
     # Added --connect-timeout and reduced --max-time for curl
-    if kill -0 $VALIDATOR_PID 2>/dev/null && curl --fail --silent --connect-timeout 0.1 --max-time 0.4 http://127.0.0.1:8080/health > /dev/null; then
+    if kill -0 $VALIDATOR_PID 2>/dev/null && curl --fail --silent --connect-timeout 0.1 --max-time 0.4 http://127.0.0.1:8082/health > /dev/null; then
         echo "Validator is running and responding."
         VALIDATOR_READY=1
         break

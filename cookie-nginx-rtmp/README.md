@@ -215,13 +215,13 @@ rtmp_auto_push directive.
                 # Make HTTP request & use HTTP retcode
                 # to decide whether to allow publishing
                 # from this connection or not
-                on_publish http://localhost:8080/publish;
+                on_publish http://localhost:8081/publish;
 
                 # Same with playing
-                on_play http://localhost:8080/play;
+                on_play http://localhost:8081/play;
 
                 # Publish/play end (repeats on disconnect)
-                on_done http://localhost:8080/done;
+                on_done http://localhost:8081/done;
 
                 # All above mentioned notifications receive
                 # standard connect() arguments as well as
@@ -238,7 +238,7 @@ rtmp_auto_push directive.
                 record_interval 2m;
 
                 # Async notify about an flv recorded
-                on_record_done http://localhost:8080/record_done;
+                on_record_done http://localhost:8081/record_done;
 
             }
 
@@ -280,7 +280,7 @@ rtmp_auto_push directive.
 
         server {
 
-            listen      8080;
+            listen      8081;
 
             # This URL provides RTMP statistics in XML
             location /stat {

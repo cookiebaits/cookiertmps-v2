@@ -46,7 +46,7 @@ check_process "stunnel4"
 
 # 3. Check Flask Health Endpoint
 echo -n "Checking Flask Validator health endpoint... "
-if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1:8080/health > /dev/null; then
+if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1:8082/health > /dev/null; then
     echo -e "[${GREEN}PASSED${NC}]"
 else
     echo -e "[${RED}FAILED${NC}]"
