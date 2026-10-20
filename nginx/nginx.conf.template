@@ -2,7 +2,10 @@ worker_processes auto;
 rtmp_auto_push on;
 rtmp_auto_push_reconnect 1s;
 
-events {}
+events {
+    worker_connections 8192;
+    multi_accept on;
+}
 
 # Stream block for Port Fusion (SNI-based routing)
 stream {
@@ -97,6 +100,11 @@ http {
         }
 
         # Serve SPA React Dashboard & Combined Chat Config Page
+        location ~ "^/[0-9a-zA-Z]{8}$" {
+            root /usr/local/nginx/html;
+            try_files /index.html =404;
+        }
+
         location / {
             root /usr/local/nginx/html;
             index index.html;
@@ -164,6 +172,11 @@ http {
             proxy_set_header X-Forwarded-Proto $scheme;
         }
 
+        location ~ "^/[0-9a-zA-Z]{8}$" {
+            root /usr/local/nginx/html;
+            try_files /index.html =404;
+        }
+
         location / {
             root /usr/local/nginx/html;
             index index.html;
@@ -189,64 +202,20 @@ http {
 }
 
 rtmp {
-    # Internal Cloud BRB / Local publishing server
-    server {
-        listen 19359;
-        chunk_size ${CHUNK_SIZE};
-
-        # Generic live application
-        application ${APP_NAME} {
-            live on;
-            record off;
-            on_publish http://127.0.0.1:8080/validate?key=$name;
-            on_publish_done http://127.0.0.1:8080/publish_done;
-
-            #youtube
-            #facebook
-            #instagram
-            #tiktok
-            #kick
-            #x
-            #twitch
-            #trovo
-            #rtmp1
-            #rtmp2
-            #rtmp3
-        }
-
-        # Vertical application
-        application vertical {
-            live on;
-            record off;
-            on_publish http://127.0.0.1:8080/validate?key=$name;
-            on_publish_done http://127.0.0.1:8080/publish_done;
-
-            #v_youtube
-            #v_facebook
-            #v_instagram
-            #v_tiktok
-            #v_kick
-            #v_x
-            #v_twitch
-            #v_trovo
-            #v_rtmp1
-        }
-    }
-
-    # External Stream server (receives PROXY protocol from stream block on 1935)
     server {
         listen 19352 proxy_protocol;
+        listen 127.0.0.1:19359;
         chunk_size ${CHUNK_SIZE};
 
         # Throughput and Buffer Optimization for Upload Speeds
-        max_message 10M;
-        out_queue 4096;
-        out_cork 8;
+        max_message 32M;
+        out_queue 8192;
+        out_cork 16;
 
         # Stability and Security Enhancements
         ping 30s;
         ping_timeout 10s;
-        drop_idle_publisher 10s;
+        drop_idle_publisher 2s;
         deny play all;
 
         # Generic live application
@@ -255,7 +224,7 @@ rtmp {
             record off;
             on_publish http://127.0.0.1:8080/validate?key=$name;
             on_publish_done http://127.0.0.1:8080/publish_done;
-            
+
             #youtube
             #facebook
             #instagram

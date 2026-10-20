@@ -1,42 +1,45 @@
-FROM buildpack-deps:trixie
+# Stage 1: Fast Frontend Build
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app
+COPY package.json tsconfig.json vite.config.ts index.html chat.html ./
+COPY src ./src
+RUN npm install --omit=dev --no-audit --no-fund 2>/dev/null || npm install
+RUN npm run build
 
-# Versions of Nginx and nginx-rtmp-module to use
+# Stage 2: Streamlined Runtime Container
+FROM debian:bookworm-slim
+
 ENV NGINX_VERSION=nginx-1.30.3
 ENV NGINX_RTMP_MODULE_VERSION=cookie-nginx-rtmp
 
+# 1. Essential system packages and slim Python runtime (cut down from 30+ to only essentials)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3 python3-pip nodejs npm && \
-    pip3 install --break-system-packages flask gunicorn requests obsws-python flask-session twitchio google-api-python-client eventlet flask-socketio edge-tts && \
-    apt-get install -y --no-install-recommends ca-certificates openssl libssl-dev stunnel4 gettext certbot ffmpeg && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        openssl \
+        libssl-dev \
+        stunnel4 \
+        gettext \
+        ffmpeg \
+        python3 \
+        python3-pip \
+        gcc \
+        make \
+        libc6-dev \
+        libpcre3-dev \
+        zlib1g-dev \
+        wget && \
+    pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip3 cache purge
-	
-# Download and decompress Nginx
-RUN mkdir -p /tmp/build/nginx && \
-    cd /tmp/build/nginx && \
-    wget -O ${NGINX_VERSION}.tar.gz https://nginx.org/download/${NGINX_VERSION}.tar.gz && \
-    tar -zxf ${NGINX_VERSION}.tar.gz
+    rm -rf /var/lib/apt/lists/*
 
-# Copy RTMP module, static web assets, and source code for self-contained build
+# 2. Build and install Nginx with cookie-nginx-rtmp (permanently cached unless RTMP module changes)
 COPY cookie-nginx-rtmp /tmp/build/cookie-nginx-rtmp
-COPY chat.html /tmp/build/chat.html
-COPY index.html /tmp/build/index.html
-COPY package.json /tmp/build/
-COPY tsconfig.json /tmp/build/
-COPY vite.config.ts /tmp/build/
-COPY src /tmp/build/src
-
-# Build Frontend Web App and Nginx inside Docker container
-RUN cd /tmp/build && \
-    npm install && \
-    npm run build && \
-    mkdir -p /usr/local/nginx/html && \
-    cp -r dist/* /usr/local/nginx/html/ && \
-    cp chat.html /usr/local/nginx/html/chat.html
-
-# Build and install Nginx
-RUN cd /tmp/build/nginx/${NGINX_VERSION} && \
+RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
+    cd /tmp/build/nginx && \
+    wget -qO ${NGINX_VERSION}.tar.gz https://nginx.org/download/${NGINX_VERSION}.tar.gz && \
+    tar -zxf ${NGINX_VERSION}.tar.gz && \
+    cd ${NGINX_VERSION} && \
     ./configure \
         --sbin-path=/usr/local/sbin/nginx \
         --conf-path=/etc/nginx/nginx.conf \
@@ -55,43 +58,36 @@ RUN cd /tmp/build/nginx/${NGINX_VERSION} && \
     make -j $(getconf _NPROCESSORS_ONLN) CFLAGS="-Wno-error" && \
     make install && \
     cp /tmp/build/cookie-nginx-rtmp/stat.xsl /usr/local/nginx/html/stat.xsl && \
-    cp /tmp/build/nginx/${NGINX_VERSION}/conf/mime.types /etc/nginx/mime.types && \
-    mkdir /var/lock/nginx && \
-    rm -rf /tmp/build
-
-# Forward logs to Docker
-RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
+    cp conf/mime.types /etc/nginx/mime.types && \
+    rm -rf /tmp/build && \
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log
 
-# Set up config file
-COPY nginx/nginx.conf.template /etc/nginx/nginx.conf.template
+# 3. Configure Stunnel
+RUN mkdir -p /etc/stunnel/conf.d
+COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
+COPY stunnel/stunnel4 /etc/default/stunnel4
+COPY stunnel/facebook.conf /etc/stunnel/conf.d/facebook.conf
+COPY stunnel/instagram.conf /etc/stunnel/conf.d/instagram.conf
+COPY stunnel/tiktok.conf /etc/stunnel/conf.d/tiktok.conf
+COPY stunnel/kick.conf /etc/stunnel/conf.d/kick.conf
+COPY stunnel/x.conf /etc/stunnel/conf.d/x.conf
 
-# Copy the validation server and supporting scripts
+# 4. Copy static web assets from builder
+COPY --from=frontend-builder /app/dist/ /usr/local/nginx/html/
+COPY chat.html /usr/local/nginx/html/chat.html
+
+# 5. App scripts and configuration (layer caching ensures updates rebuild in <1s)
+COPY nginx/nginx.conf.template /etc/nginx/nginx.conf.template
 COPY stream_validator.py /app/stream_validator.py
 COPY update_titles.py /app/update_titles.py
 COPY tiktok_pusher.py /app/tiktok_pusher.py
 COPY test_noalbs.py /app/test_noalbs.py
 COPY noalbs /app/noalbs
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
-# Config Stunnel
-RUN mkdir -p  /etc/stunnel/conf.d
-COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
-COPY stunnel/stunnel4 /etc/default/stunnel4
-
-# Facebook Stunnel Port 19350
-COPY stunnel/facebook.conf /etc/stunnel/conf.d/facebook.conf
-# Instagram Stunnel Port 19351
-COPY stunnel/instagram.conf /etc/stunnel/conf.d/instagram.conf
-# Tiktok Stunnel Port 19358
-COPY stunnel/tiktok.conf /etc/stunnel/conf.d/tiktok.conf
-# Kick Stunnel Port 19356
-COPY stunnel/kick.conf /etc/stunnel/conf.d/kick.conf
-# X Stunnel Port 19354
-COPY stunnel/x.conf /etc/stunnel/conf.d/x.conf
-
-RUN apt-get update && apt-get upgrade -y && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Define generic non-sensitive environment variables
+# Environment variables
 ENV YOUTUBE_URL=rtmp://x.rtmp.youtube.com/live2/
 ENV FACEBOOK_URL=rtmp://127.0.0.1:19350/rtmp/
 ENV INSTAGRAM_URL=rtmp://127.0.0.1:19351/rtmp/
@@ -103,11 +99,8 @@ ENV X_URL=rtmp://127.0.0.1:19354/x/
 ENV APP_NAME=live
 ENV CHUNK_SIZE=8192
 
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-
-EXPOSE 1935 80 8081
+WORKDIR /app
+EXPOSE 1935 80 8080 8081 8443
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-
 CMD ["nginx", "-g", "daemon off;"]

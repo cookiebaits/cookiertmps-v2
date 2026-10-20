@@ -123,7 +123,7 @@ CHAT_HEX_KEY=""
 
 # Host Port Settings
 PORT_RTMP="1935"
-PORT_HTTP="81"
+PORT_HTTP="8080"
 PORT_HTTPS="8443"
 PORT_STATS="8081"
 
@@ -1313,14 +1313,22 @@ enable_bbr_and_tcp_optimizations() {
     echo -e "${YELLOW}Writing sysctl network tuning parameters to $SYSCTL_CONF ...${NC}"
 
     cat << 'SYSCTL_EOF' | $SUDO tee "$SYSCTL_CONF" >/dev/null
-# Google BBR Congestion Control & Buffer Tuning
+# Google BBR Congestion Control & 32MB Buffer Tuning for Maximum Upload Speeds
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.core.rmem_default = 2097152
+net.core.wmem_default = 2097152
+net.ipv4.tcp_rmem = 4096 87380 33554432
+net.ipv4.tcp_wmem = 4096 65536 33554432
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_low_latency = 1
 net.ipv4.tcp_notsent_lowat = 16384
+net.core.netdev_max_backlog = 10000
+net.core.somaxconn = 4096
 SYSCTL_EOF
 
     $SUDO sysctl -p "$SYSCTL_CONF" 2>/dev/null || $SUDO sysctl --system 2>/dev/null || true
@@ -1372,6 +1380,21 @@ check_port() {
     fi
 }
 
+fast_update_deploy() {
+    clear
+    echo -e "${GREEN}=====================================${NC}"
+    echo -e "${GREEN}  Fast Update / Re-deploy Instance   ${NC}"
+    echo -e "${GREEN}=====================================${NC}"
+
+    if [ -d ".git" ] && command -v git &> /dev/null; then
+        echo -e "${YELLOW}Checking for updates from repository...${NC}"
+        git pull --rebase 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}Fast deploying updated configuration & server instance...${NC}"
+    FAST_UPDATE_MODE="true" build_and_run
+}
+
 build_and_run() {
     if ! command -v docker &> /dev/null; then
         echo -e "${RED}Docker is not installed! Please run 'Install Docker' first.${NC}"
@@ -1379,15 +1402,17 @@ build_and_run() {
         return
     fi
 
-    echo -e "${YELLOW}Stopping and removing any old container instances and associated Docker volumes...${NC}"
+    echo -e "${YELLOW}Stopping and removing any old container instances...${NC}"
     OLD_CONTAINERS=$(docker ps -a --format '{{.ID}} {{.Names}}' | grep -iE 'rtmp|cookie|prism' | awk '{print $1}')
     if [ ! -z "$OLD_CONTAINERS" ]; then
         docker stop $OLD_CONTAINERS 2>/dev/null || true
         docker rm -v -f $OLD_CONTAINERS 2>/dev/null || true
     fi
-    OLD_VOLUMES=$(docker volume ls -q | grep -iE 'rtmp|cookie|prism' || true)
-    if [ ! -z "$OLD_VOLUMES" ]; then
-        docker volume rm -f $OLD_VOLUMES 2>/dev/null || true
+    if [ "$FAST_UPDATE_MODE" != "true" ]; then
+        OLD_VOLUMES=$(docker volume ls -q | grep -iE 'rtmp|cookie|prism' || true)
+        if [ ! -z "$OLD_VOLUMES" ]; then
+            docker volume rm -f $OLD_VOLUMES 2>/dev/null || true
+        fi
     fi
 
     enable_bbr_and_tcp_optimizations
@@ -1577,7 +1602,7 @@ build_and_run() {
     if [ $? -eq 0 ]; then
         SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
         DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
-        if [ "$PORT_HTTP" != "80" ] && [ -z "$SERVER_DOMAIN" ]; then
+        if [ "$PORT_HTTP" != "80" ]; then
             CHAT_CONFIG_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/${CHAT_HEX_KEY}"
             DASHBOARD_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/"
             STATS_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/stat"
@@ -1802,7 +1827,7 @@ SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
 while true; do
     clear
     DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
-    if [ "$PORT_HTTP" != "80" ] && [ -z "$SERVER_DOMAIN" ]; then
+    if [ "$PORT_HTTP" != "80" ]; then
         CHAT_CONFIG_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/${CHAT_HEX_KEY}"
         DASHBOARD_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/"
         STATS_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/stat"
@@ -1829,11 +1854,12 @@ while true; do
     echo "6) Configure Domain / Reverse Proxy (Optional)"
     echo "7) Configure Optimizations (Chunk Size)"
     echo "8) Configure NOALBS Scene Switcher"
-    echo "9) Build & Start Server"
-    echo "10) Run Integration Tests"
-    echo "11) Stop Server & Uninstall"
-    echo "12) View Logs"
-    echo "13) Quit"
+    echo "9) Fresh Install & Build Server"
+    echo "10) Fast Update / Re-deploy Instance"
+    echo "11) Run Integration Tests"
+    echo "12) Stop Server & Uninstall"
+    echo "13) View Logs"
+    echo "14) Quit"
     echo -e "Select an option: \c"
     read -r option
 
@@ -1847,10 +1873,11 @@ while true; do
         7) configure_optimizations ;;
         8) configure_noalbs ;;
         9) build_and_run ;;
-        10) if [ -f "./integration_test.sh" ]; then chmod +x ./integration_test.sh; ./integration_test.sh; else echo -e "${RED}Test script not found.${NC}"; fi; echo -e "Press Enter to continue..."; read -r ;;
-        11) stop_and_uninstall ;;
-        12) view_logs ;;
-        13|q|Q) clear; echo -e "${GREEN}Goodbye!${NC}"; break ;;
+        10) fast_update_deploy ;;
+        11) if [ -f "./integration_test.sh" ]; then chmod +x ./integration_test.sh; ./integration_test.sh; else echo -e "${RED}Test script not found.${NC}"; fi; echo -e "Press Enter to continue..."; read -r ;;
+        12) stop_and_uninstall ;;
+        13) view_logs ;;
+        14|q|Q) clear; echo -e "${GREEN}Goodbye!${NC}"; break ;;
         *) echo -e "${RED}Invalid option${NC}"; sleep 1 ;;
     esac
 done

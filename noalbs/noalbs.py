@@ -232,12 +232,15 @@ class Noalbs:
         bitrate, _, _ = self.get_stream_info()
         return bitrate
 
-    def drop_publisher(self, app, name):
+    def drop_publisher(self, app, name=None):
         """Drops a publisher connection via Nginx RTMP control module."""
         try:
-            url = f"{self.control_url}/drop/publisher?app={app}&name={name}"
+            if name:
+                url = f"{self.control_url}/drop/publisher?app={app}&name={name}"
+            else:
+                url = f"{self.control_url}/drop/publisher?app={app}"
             requests.get(url, timeout=3)
-            logger.info(f"Dropped low-bitrate publisher on app={app}, name={name} to prioritize MP4 loop.")
+            logger.info(f"Dropped publisher on app={app}, name={name} to prioritize MP4 loop.")
         except Exception as e:
             logger.debug(f"Drop publisher error: {e}")
 
@@ -401,6 +404,10 @@ class Noalbs:
                     self.is_low = True
                     self.is_streaming = False
                     if self.fallback_mode == "video" or self.cloud_brb_enabled:
+                        # Drop lingering/hung connections so MP4 loop takes over relay without key collisions
+                        for app_name, stream_name, _ in active_streams:
+                            self.drop_publisher(app_name, stream_name)
+                        self.drop_publisher(self.app_name, None)
                         # Immediately start video fallback without delay on disconnect
                         self.start_cloud_brb()
                         self.switch_scene(self.scene_brb)
