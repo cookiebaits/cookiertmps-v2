@@ -189,53 +189,9 @@ http {
 }
 
 rtmp {
-    # Internal Cloud BRB / Local publishing server
-    server {
-        listen 19359;
-        chunk_size ${CHUNK_SIZE};
-
-        # Generic live application
-        application ${APP_NAME} {
-            live on;
-            record off;
-            on_publish http://127.0.0.1:8082/validate?key=$name;
-            on_publish_done http://127.0.0.1:8082/publish_done;
-
-            #youtube
-            #facebook
-            #instagram
-            #tiktok
-            #kick
-            #x
-            #twitch
-            #trovo
-            #rtmp1
-            #rtmp2
-            #rtmp3
-        }
-
-        # Vertical application
-        application vertical {
-            live on;
-            record off;
-            on_publish http://127.0.0.1:8082/validate?key=$name;
-            on_publish_done http://127.0.0.1:8082/publish_done;
-
-            #v_youtube
-            #v_facebook
-            #v_instagram
-            #v_tiktok
-            #v_kick
-            #v_x
-            #v_twitch
-            #v_trovo
-            #v_rtmp1
-        }
-    }
-
-    # External Stream server (receives PROXY protocol from stream block on 1935)
     server {
         listen 19352 proxy_protocol;
+        listen 19359;
         chunk_size ${CHUNK_SIZE};
 
         # Throughput and Buffer Optimization for Upload Speeds
@@ -255,7 +211,7 @@ rtmp {
             record off;
             on_publish http://127.0.0.1:8082/validate?key=$name;
             on_publish_done http://127.0.0.1:8082/publish_done;
-            
+
             #youtube
             #facebook
             #instagram
