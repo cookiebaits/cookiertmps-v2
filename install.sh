@@ -35,13 +35,34 @@ handle_existing_instance_upgrade() {
             cp "../cookie-rtmps/rtmp_config.env" "./rtmp_config.env" 2>/dev/null || true
         fi
 
-        # Check and replace any newer files from adjacent directories if present
+        # Targeted update check: ONLY check for updates related to RTMP modules and the installer itself
+        local SOURCE_DIR=""
         if [ -d "../CookieRTMP-v2" ] && [ "../CookieRTMP-v2" != "$PWD" ]; then
-            echo -e "${GREEN}Checking for newer files and replacing updates...${NC}"
-            cp -ru ../CookieRTMP-v2/* . 2>/dev/null || true
+            SOURCE_DIR="../CookieRTMP-v2"
         elif [ -d "../cookie-rtmps" ] && [ "../cookie-rtmps" != "$PWD" ]; then
-            echo -e "${GREEN}Checking for newer files and replacing updates...${NC}"
-            cp -ru ../cookie-rtmps/* . 2>/dev/null || true
+            SOURCE_DIR="../cookie-rtmps"
+        fi
+
+        if [ -n "$SOURCE_DIR" ]; then
+            echo -e "${GREEN}Checking for updates to RTMP modules and installer files only...${NC}"
+            # 1. RTMP Module
+            if [ -d "$SOURCE_DIR/cookie-nginx-rtmp" ]; then
+                cp -ru "$SOURCE_DIR/cookie-nginx-rtmp" . 2>/dev/null || true
+            fi
+            # 2. Core installer and server scripts
+            local CORE_FILES=("install.sh" "Dockerfile" "docker-entrypoint.sh" "stream_validator.py" "failover_manager.py")
+            for f in "${CORE_FILES[@]}"; do
+                if [ -f "$SOURCE_DIR/$f" ]; then
+                    cp -u "$SOURCE_DIR/$f" . 2>/dev/null || true
+                fi
+            done
+            # 3. Core streaming config directories
+            local CORE_DIRS=("nginx" "stunnel" "noalbs")
+            for d in "${CORE_DIRS[@]}"; do
+                if [ -d "$SOURCE_DIR/$d" ]; then
+                    cp -ru "$SOURCE_DIR/$d" . 2>/dev/null || true
+                fi
+            done
         fi
 
         # Preserve data volume (keys, brb_video.mp4, etc.) if available in older directory
@@ -53,7 +74,7 @@ handle_existing_instance_upgrade() {
             cp -r ../CookieRTMP-v2/data/* ./data/ 2>/dev/null || true
         fi
 
-        echo -e "${GREEN}File check complete. Running streaming instances are left untouched.${NC}"
+        echo -e "${GREEN}RTMP modules and installer update check complete.${NC}"
         echo -e "${GREEN}Loading CookieRTMPS install menu...${NC}\n"
         sleep 1
     fi

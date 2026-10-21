@@ -1,9 +1,10 @@
 # Stage 1: Fast Frontend Build
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app
-COPY package.json tsconfig.json vite.config.ts index.html chat.html ./
-COPY src ./src
+COPY package.json tsconfig.json vite.config.ts ./
 RUN npm install
+COPY index.html chat.html ./
+COPY src ./src
 RUN npm run build
 
 # Stage 2: Streamlined Runtime Container
@@ -12,8 +13,14 @@ FROM buildpack-deps:trixie
 ENV NGINX_VERSION=nginx-1.30.3
 ENV NGINX_RTMP_MODULE_VERSION=cookie-nginx-rtmp
 
-# 1. Essential system packages and slim Python runtime
-RUN apt-get update && \
+# 1. Essential system packages and slim Python runtime (optimized APT to eliminate package list hangs)
+RUN echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99fast && \
+    echo 'Dir::Cache::pkgcache "";' >> /etc/apt/apt.conf.d/99fast && \
+    echo 'Dir::Cache::srcpkgcache "";' >> /etc/apt/apt.conf.d/99fast && \
+    echo 'APT::Install-Recommends "0";' >> /etc/apt/apt.conf.d/99fast && \
+    echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/99fast && \
+    echo 'Acquire::GzipIndexes "true";' >> /etc/apt/apt.conf.d/99fast && \
+    apt-get update -o Acquire::IndexTargets::deb::Translations=none && \
     apt-get install -y --no-install-recommends \
         stunnel4 \
         gettext \
@@ -25,7 +32,7 @@ RUN apt-get update && \
         zlib1g-dev && \
     pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99fast
 
 # 2. Build and install Nginx with cookie-nginx-rtmp (permanently cached unless RTMP module changes)
 COPY cookie-nginx-rtmp /tmp/build/cookie-nginx-rtmp
