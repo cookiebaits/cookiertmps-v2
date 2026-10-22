@@ -6,7 +6,6 @@ import tempfile
 import shutil
 from unittest.mock import patch, MagicMock
 
-# Import FailoverManager
 sys.path.insert(0, os.path.abspath("."))
 from failover_manager import FailoverManager, is_valid_file
 
@@ -23,7 +22,8 @@ class TestFailoverManager(unittest.TestCase):
             "BRB_VIDEO_PATH": self.brb_path,
             "LOW_BITRATE": "1000",
             "RESTORE_BITRATE": "1500",
-            "APP_NAME": "live"
+            "APP_NAME": "live",
+            "CLOUD_BRB_TIMEOUT": "300"
         })
         self.env_patcher.start()
         self.fm = FailoverManager()
@@ -56,12 +56,12 @@ class TestFailoverManager(unittest.TestCase):
         """
         mock_response = MagicMock()
         mock_response.read.return_value = mock_xml.encode('utf-8')
-        mock_urlopen.return_value = mock_response
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        mock_urlopen.return_value.read.return_value = mock_xml.encode('utf-8')
 
         stats = self.fm.get_stream_stats()
         self.assertIn("live", stats)
         self.assertIn("test_key", stats["live"])
-        # 256000 * 8 / 1024 = 2000 kbps
         self.assertEqual(stats["live"]["test_key"]["bitrate"], 2000)
         self.assertTrue(stats["live"]["test_key"]["publishing"])
 
@@ -93,6 +93,22 @@ class TestFailoverManager(unittest.TestCase):
         self.assertIn("-c", args)
         self.assertIn("copy", args)
         self.assertIn("rtmp://127.0.0.1:19359/relay/main", args)
+
+    @patch("urllib.request.urlopen")
+    def test_wait_for_nginx(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        self.assertTrue(self.fm.wait_for_nginx(max_wait=1))
+
+    @patch("urllib.request.urlopen")
+    def test_drop_publisher(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+        self.fm.drop_publisher("live", "test_key")
+        mock_urlopen.assert_called_once()
+        url = mock_urlopen.call_args[0][0].full_url
+        self.assertIn("control/drop/publisher?app=live&name=test_key", url)
 
 if __name__ == "__main__":
     unittest.main()

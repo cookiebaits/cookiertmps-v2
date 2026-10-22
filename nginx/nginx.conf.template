@@ -203,12 +203,14 @@ rtmp {
         ping 30s;
         ping_timeout 10s;
         drop_idle_publisher 10s;
+        allow play 127.0.0.1;
         deny play all;
 
         # Generic live application (Ingest)
         application ${APP_NAME} {
             live on;
             record off;
+            allow play 127.0.0.1;
             on_publish http://127.0.0.1:8082/validate?key=$name;
             on_publish_done http://127.0.0.1:8082/publish_done;
         }
@@ -217,6 +219,7 @@ rtmp {
         application vertical {
             live on;
             record off;
+            allow play 127.0.0.1;
             on_publish http://127.0.0.1:8082/validate?key=$name;
             on_publish_done http://127.0.0.1:8082/publish_done;
         }
@@ -225,6 +228,8 @@ rtmp {
         application relay {
             live on;
             record off;
+            allow publish 127.0.0.1;
+            allow play 127.0.0.1;
 
             #youtube
             #facebook
@@ -243,6 +248,8 @@ rtmp {
         application vertical_relay {
             live on;
             record off;
+            allow publish 127.0.0.1;
+            allow play 127.0.0.1;
 
             #v_youtube
             #v_facebook
