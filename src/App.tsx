@@ -194,10 +194,26 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('cookiertmps_stream_key_auth');
+    setIsAuthenticated(false);
+  };
+
+  // If password protection is enabled and user is not authenticated, render ONLY the login prompt box
+  if (isPasswordProtected && !isAuthenticated) {
+    return (
+      <PasswordAuthModal
+        onUnlock={(pass) => verifyPassword(pass, false)}
+        isLoading={isVerifying}
+        errorMsg={authError}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       
-      {/* Top Header Bar with Copy OBS URL (respecting enabled platforms) and Hex Key Cycle Button */}
+      {/* Top Header Bar */}
       <Header
         isLive={isLive}
         activeKeyCount={7}
@@ -205,6 +221,7 @@ export const App: React.FC = () => {
         onCycleObsKey={handleCycleObsKey}
         isCyclingKey={isCyclingKey}
         platforms={platforms}
+        onLogout={handleLogout}
       />
 
       {/* Main Navigation Tabs */}
@@ -213,20 +230,12 @@ export const App: React.FC = () => {
       {/* Main View Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeTab === 'chat' && (
-          isPasswordProtected && !isAuthenticated ? (
-            <PasswordAuthModal
-              onUnlock={(pass) => verifyPassword(pass, false)}
-              isLoading={isVerifying}
-              errorMsg={authError}
-            />
-          ) : (
-            <CombinedChatTab
-              obsHexKey={obsHexKey}
-              onCycleObsKey={handleCycleObsKey}
-              platforms={platforms}
-              setPlatforms={setPlatforms}
-            />
-          )
+          <CombinedChatTab
+            obsHexKey={obsHexKey}
+            onCycleObsKey={handleCycleObsKey}
+            platforms={platforms}
+            setPlatforms={setPlatforms}
+          />
         )}
         {activeTab === 'destinations' && <DestinationsTab />}
         {activeTab === 'titles' && <TitlesAndEpisodeTab />}

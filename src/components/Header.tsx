@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Copy, Check, Server, RefreshCw, KeyRound, Monitor } from 'lucide-react';
+import { ShieldCheck, Copy, Check, Server, RefreshCw, KeyRound, Monitor, Lock } from 'lucide-react';
 import { ChatPlatformConfig } from '../types';
 
 interface HeaderProps {
@@ -9,6 +9,7 @@ interface HeaderProps {
   onCycleObsKey: () => void;
   isCyclingKey: boolean;
   platforms?: ChatPlatformConfig[];
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   onCycleObsKey,
   isCyclingKey,
   platforms,
+  onLogout,
 }) => {
   const [copied, setCopied] = React.useState(false);
   const [justCycled, setJustCycled] = React.useState(false);
@@ -160,7 +162,16 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </button>
 
-          {/* Toast feedback when key is refreshed */}
+          {/* Lock / Logout Session button */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="p-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition border border-slate-700 hover:border-rose-500/40"
+              title="Lock Dashboard Session"
+            >
+              <Lock className="w-4 h-4" />
+            </button>
+          )}
           {justCycled && (
             <div className="absolute right-4 top-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-mono px-2.5 py-1 rounded-lg flex items-center space-x-1 shadow-lg animate-fade-in z-50">
               <KeyRound className="w-3 h-3 text-emerald-400" />
