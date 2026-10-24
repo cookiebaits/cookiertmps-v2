@@ -159,6 +159,28 @@ class FailoverManager:
             except Exception as e:
                 logger.error(f"Error preparing BRB video: {e}")
 
+        if not is_valid_file(target_path):
+            logger.warning(f"BRB video not found or download failed. Generating broadcast-standard fallback video at {target_path}...")
+            try:
+                gen_cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "color=c=0x0f172a:s=1920x1080:r=60",
+                    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    "-t", "5",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p",
+                    "-r", "60", "-g", "120", "-keyint_min", "120", "-sc_threshold", "0",
+                    "-b:v", "3000k", "-minrate", "3000k", "-maxrate", "3000k", "-bufsize", "3000k",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-movflags", "+faststart",
+                    target_path
+                ]
+                subprocess.run(gen_cmd, capture_output=True, timeout=30)
+                if is_valid_file(target_path):
+                    logger.info("Broadcast standard fallback video generated successfully.")
+            except Exception as ex_gen:
+                logger.error(f"Failed to generate fallback video: {ex_gen}")
+
     def get_stream_stats(self):
         try:
             req = urllib.request.Request(self.stats_url, headers={'User-Agent': 'CloudSceneSwitcher'})

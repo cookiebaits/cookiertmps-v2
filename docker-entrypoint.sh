@@ -210,12 +210,11 @@ if [ -n "$SERVER_DOMAIN" ] && [ "$SERVER_DOMAIN" != "localhost" ]; then
     ) &
 fi
 
-# --- Start Failover Manager & NOALBS ---
-echo "Starting Failover Manager background process..."
-python3 /app/failover_manager.py 2>&1 | tee -a /tmp/failover_manager.log &
-
-if [ "$(echo "${NOALBS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-    echo "Starting NOALBS background process..."
+# --- Start NOALBS & Cloud Failover Protection ---
+if [ "$(echo "${NOALBS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ] || [ "$(echo "${CLOUD_BRB:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+    echo "Verifying NOALBS / Cloud BRB fallback video readiness..."
+    python3 -c "from noalbs.noalbs import Noalbs; Noalbs().ensure_brb_video_ready()" 2>&1 | tee -a /tmp/noalbs.log || true
+    echo "Starting NOALBS / Cloud BRB Disconnection Protection process..."
     python3 /app/noalbs/noalbs.py 2>&1 | tee -a /tmp/noalbs.log &
 fi
 

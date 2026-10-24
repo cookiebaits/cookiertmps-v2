@@ -1195,8 +1195,25 @@ ensure_brb_video_transcoded() {
             mv "${target}.tmp" "$target"
         fi
     else
-        echo -e "${RED}Video download or retrieval failed. Please check the URL or file path.${NC}"
+        echo -e "${RED}Video download or retrieval failed from: $source_input${NC}"
         rm -f "${target}.tmp"
+        if command -v ffmpeg &> /dev/null; then
+            echo -e "${YELLOW}Synthesizing broadcast-standard standby MP4 video (H.264 / AAC 48kHz Stereo) so server always has fallback protection ready...${NC}"
+            ffmpeg -y -hide_banner -loglevel error \
+                -f lavfi -i "color=c=0x0f172a:s=1920x1080:r=60" \
+                -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
+                -t 5 \
+                -c:v libx264 -preset ultrafast -profile:v high -level:v 4.1 -pix_fmt yuv420p \
+                -r 60 -g 120 -keyint_min 120 -sc_threshold 0 \
+                -b:v 3000k -minrate 3000k -maxrate 3000k -bufsize 3000k \
+                -c:a aac -ar 48000 -ac 2 -b:a 160k \
+                -map 0:v:0 -map 1:a:0 \
+                -movflags +faststart "$target" 2>/dev/null || true
+            if [ -f "$target" ] && [ -s "$target" ]; then
+                echo -e "${GREEN}Standby MP4 fallback video generated successfully at $target.${NC}"
+                return 0
+            fi
+        fi
         return 1
     fi
 }

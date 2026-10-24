@@ -21,7 +21,7 @@ def is_valid_file(path):
 
 class Noalbs:
     def __init__(self):
-        self.enabled = os.getenv("NOALBS_ENABLED", "false").lower() == "true"
+        self.enabled = os.getenv("NOALBS_ENABLED", "true").lower() == "true"
         self.low_threshold = int(os.getenv("LOW_BITRATE", 1000))
         self.restore_threshold = int(os.getenv("RESTORE_BITRATE", 1500))
         self.obs_host = os.getenv("OBS_WS_HOST", "127.0.0.1")
@@ -35,7 +35,7 @@ class Noalbs:
         self.control_url = "http://127.0.0.1:8081/control"
 
         self.fallback_mode = os.getenv("FALLBACK_MODE", "video").lower()
-        self.cloud_brb_enabled = os.getenv("CLOUD_BRB", "false").lower() == "true"
+        self.cloud_brb_enabled = os.getenv("CLOUD_BRB", "true").lower() == "true"
         self.brb_video_path = os.getenv("BRB_VIDEO_PATH", "/app/data/brb_video.mp4")
         self.cloud_brb_timeout = int(os.getenv("CLOUD_BRB_TIMEOUT", 300))
         self.cloud_process = None
@@ -155,6 +155,29 @@ class Noalbs:
                         pass
             except Exception as e:
                 logger.error(f"Failed to download/transcode BRB video: {e}")
+
+        # If target video is still missing, synthesize a broadcast standard fallback MP4 (H.264 + 48kHz Stereo AAC)
+        if not is_valid_file(target_path):
+            logger.warning(f"BRB video not found or download failed. Generating broadcast-standard fallback video at {target_path}...")
+            try:
+                gen_cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "color=c=0x0f172a:s=1920x1080:r=60",
+                    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    "-t", "5",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "high", "-level:v", "4.1", "-pix_fmt", "yuv420p",
+                    "-r", "60", "-g", "120", "-keyint_min", "120", "-sc_threshold", "0",
+                    "-b:v", "3000k", "-minrate", "3000k", "-maxrate", "3000k", "-bufsize", "3000k",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-movflags", "+faststart",
+                    target_path
+                ]
+                subprocess.run(gen_cmd, capture_output=True, timeout=30)
+                if is_valid_file(target_path):
+                    logger.info("Broadcast standard fallback video generated successfully.")
+            except Exception as ex_gen:
+                logger.error(f"Failed to generate fallback video: {ex_gen}")
 
     def get_obs_client(self):
         if self.obs_client:
@@ -302,7 +325,7 @@ class Noalbs:
             def kill_proc():
                 try:
                     proc.terminate()
-                    proc.wait(timeout=3)
+                    proc.wait(timeout=1.5)
                 except Exception:
                     try:
                         proc.kill()
@@ -343,35 +366,16 @@ class Noalbs:
         while True:
             bitrate, has_publisher, active_streams = self.get_stream_info()
 
-            # 1. Check timeout or process crash if Cloud BRB is currently active
-            if self.cloud_process and self.cloud_brb_start_time:
-                if self.cloud_process.poll() is not None:
-                    logger.warning("Cloud BRB FFmpeg process exited unexpectedly. Restarting...")
-                    self.cloud_process = None
-                    self.start_cloud_brb()
-
-                elapsed = time.time() - self.cloud_brb_start_time
-                if elapsed >= self.cloud_brb_timeout:
-                    logger.error(f"Cloud BRB fallback active for {self.cloud_brb_timeout} seconds without stream recovery. Terminating stream completely.")
-                    self.stop_cloud_brb()
-                    client = self.get_obs_client()
-                    if client:
-                        try:
-                            client.stop_stream()
-                            logger.info("Successfully requested OBS WebSocket to stop stream.")
-                        except Exception as e:
-                            logger.error(f"Failed to stop OBS stream via WebSocket: {e}")
-                    self.is_streaming = False
-                    self.is_low = False
-                    consecutive_low = 0
-                    time.sleep(2)
-                    continue
-
-            # 2. Source stream is connected
+            # 1. Broadcaster is actively publishing
             if has_publisher and bitrate > 0:
                 if not self.is_streaming:
                     logger.info(f"Stream detected at {bitrate}kbps.")
                     self.is_streaming = True
+
+                # If cloud BRB process was active, stop it immediately because real broadcaster is back!
+                if self.cloud_process:
+                    logger.info(f"Broadcaster active ({bitrate}kbps). Terminating Cloud BRB fallback process.")
+                    self.stop_cloud_brb()
 
                 # Upload speed drop check
                 if bitrate < self.low_threshold:
@@ -384,6 +388,7 @@ class Noalbs:
                             # Drop degraded publishers on external port so MP4 loop takes over relay cleanly
                             for app_name, stream_name, _ in active_streams:
                                 self.drop_publisher(app_name, stream_name)
+                            time.sleep(0.3)
                             self.start_cloud_brb()
                             self.switch_scene(self.scene_brb)
                         else:
@@ -397,6 +402,8 @@ class Noalbs:
                             self.stop_cloud_brb()
                             self.switch_scene(self.scene_main)
                             self.is_low = False
+
+            # 2. Broadcaster is disconnected or bitrate dropped to 0
             else:
                 consecutive_low = 0
                 if self.is_streaming:
@@ -407,7 +414,7 @@ class Noalbs:
                         # Drop lingering/hung connections so MP4 loop takes over relay without key collisions
                         for app_name, stream_name, _ in active_streams:
                             self.drop_publisher(app_name, stream_name)
-                        self.drop_publisher(self.app_name, None)
+                        time.sleep(0.3)
                         # Immediately start video fallback without delay on disconnect
                         self.start_cloud_brb()
                         self.switch_scene(self.scene_brb)
@@ -416,6 +423,34 @@ class Noalbs:
                 elif self.is_low and not self.cloud_process and (self.fallback_mode == "video" or self.cloud_brb_enabled):
                     # Fail-safe watchdog: ensure MP4 loop is broadcasting while in low/disconnected state
                     self.start_cloud_brb()
+
+            # 3. Check timeout or process recovery if Cloud BRB is currently active
+            if self.cloud_process and self.cloud_brb_start_time:
+                if self.cloud_process.poll() is not None:
+                    if not has_publisher and self.is_low:
+                        logger.warning("Cloud BRB FFmpeg process exited unexpectedly. Restarting...")
+                        self.cloud_process = None
+                        self.start_cloud_brb()
+                    else:
+                        self.cloud_process = None
+
+                if self.cloud_brb_start_time:
+                    elapsed = time.time() - self.cloud_brb_start_time
+                    if elapsed >= self.cloud_brb_timeout:
+                        logger.error(f"Cloud BRB fallback active for {self.cloud_brb_timeout} seconds without stream recovery. Terminating stream completely.")
+                        self.stop_cloud_brb()
+                        client = self.get_obs_client()
+                        if client:
+                            try:
+                                client.stop_stream()
+                                logger.info("Successfully requested OBS WebSocket to stop stream.")
+                            except Exception as e:
+                                logger.error(f"Failed to stop OBS stream via WebSocket: {e}")
+                        self.is_streaming = False
+                        self.is_low = False
+                        consecutive_low = 0
+                        time.sleep(2)
+                        continue
 
             time.sleep(1)
 

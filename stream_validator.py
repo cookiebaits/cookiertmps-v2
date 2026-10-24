@@ -158,6 +158,23 @@ def validate():
     if stream_key_attempt in VALID_KEYS:
         app.logger.info(f"ACCEPTED stream from {client_ip} (Key: {stream_key_attempt})")
 
+        # Automatically clear any active cloud_brb fallback publisher so user takes over with 0 collision
+        app_name = parsed_data.get('app', [''])[0] or os.getenv('APP_NAME', 'live')
+        try:
+            import urllib.request
+            for a in [app_name, 'vertical']:
+                drop_url = f"http://127.0.0.1:8081/control/drop/publisher?app={a}&name=cloud_brb_loop"
+                req = urllib.request.Request(drop_url, headers={'User-Agent': 'StreamValidator'})
+                urllib.request.urlopen(req, timeout=1)
+            app.logger.info(f"Cleared cloud_brb_loop on {app_name} and vertical for incoming live stream.")
+        except Exception:
+            pass
+
+        try:
+            subprocess.run(["pkill", "-f", "cloud_brb_loop"], timeout=1, check=False)
+        except Exception:
+            pass
+
         # Update titles in background to not block Nginx
         threading.Thread(target=run_update_titles).start()
         
