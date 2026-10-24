@@ -127,7 +127,7 @@ def validate():
     parsed_data = parse_qs(raw_data)
     stream_key_attempt = parsed_data.get('name', [''])[0]
 
-    # Robust client IP extraction for WireGuard, VPN, and proxy setups
+    # Robust client IP extraction for VPN and proxy setups
     client_ip = (
         request.form.get('addr') or
         request.args.get('addr') or

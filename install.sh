@@ -920,7 +920,7 @@ configure_whitelist() {
         echo -e "${GREEN}=== IP Whitelist Configuration ===${NC}"
         echo -e "Current Accepted IP: ${YELLOW}${ACCEPTED_IP:-None (Allow All)}${NC}"
         echo ""
-        echo "1) Server's IP Address (For those who proxy, VPN or Wireguard Into the Server)"
+        echo "1) Server's IP Address (For those who proxy or VPN Into the Server)"
         echo "2) Manual IP Address"
         echo "3) Clear IP Address"
         echo "4) Back to Main Menu"
@@ -941,7 +941,7 @@ configure_whitelist() {
                 ACCEPTED_IP=$(echo "$WHITELIST_ITEMS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//')
                 
                 if [ ! -z "$ACCEPTED_IP" ]; then
-                    echo -e "${GREEN}IP Whitelist updated to server IP & WireGuard/VPN subnets: $ACCEPTED_IP${NC}"
+                    echo -e "${GREEN}IP Whitelist updated to server IP & VPN subnets: $ACCEPTED_IP${NC}"
                 else
                     echo -e "${RED}Failed to configure whitelist IPs.${NC}"
                 fi
@@ -1380,101 +1380,6 @@ configure_optimizations() {
     echo -e "\nApplying Google BBR and TCP optimizations..."
     enable_bbr_and_tcp_optimizations
     sleep 2
-}
-
-setup_wireguard_servers() {
-    clear
-    echo -e "${GREEN}========================================================================${NC}"
-    echo -e "${GREEN}   [1] Setup WireGuard Servers (Instances 1 & 2)                        ${NC}"
-    echo -e "${GREEN}========================================================================${NC}"
-    echo -e "${YELLOW}Direct Dual Configuration Generator (No Cloudflare prompt required):${NC}\n"
-
-    echo -e "${GREEN}------------------------------------------------------------------------${NC}"
-    echo -e "${GREEN}[CONFIG 1] WITH Cloudflare Anti-Flag & ISP Host Masking Integration     ${NC}"
-    echo -e "${GREEN}------------------------------------------------------------------------${NC}"
-    cat << 'EOF'
-# --- Instance 1: Primary Ingest Gateway (Port 51820) [/etc/wireguard/wg0.conf] ---
-[Interface]
-Address = 10.8.0.1/24
-PrivateKey = <SERVER_INSTANCE_1_PRIVATE_KEY>
-ListenPort = 51820
-MTU = 1280
-DNS = 1.1.1.1, 1.0.0.1
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
-[Peer]
-# Broadcaster / OBS Studio Client
-PublicKey = <CLIENT_OBS_PUBLIC_KEY>
-AllowedIPs = 10.8.0.2/32
-
-[Peer]
-# Instance 2 Failover Peer (Cloudflare Anti-Flag Tunnel)
-PublicKey = <SERVER_INSTANCE_2_PUBLIC_KEY>
-AllowedIPs = 10.8.0.3/32
-Endpoint = 162.159.192.1:2408
-PersistentKeepalive = 25
-
-# --- Instance 2: Secondary Failover Gateway (Port 51821) [/etc/wireguard/wg1.conf] ---
-[Interface]
-Address = 10.9.0.1/24
-PrivateKey = <SERVER_INSTANCE_2_PRIVATE_KEY>
-ListenPort = 51821
-MTU = 1280
-DNS = 1.1.1.1, 1.0.0.1
-PostUp = iptables -A FORWARD -i wg1 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
-PostDown = iptables -D FORWARD -i wg1 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
-[Peer]
-# Broadcaster / OBS Studio Client
-PublicKey = <CLIENT_OBS_PUBLIC_KEY>
-AllowedIPs = 10.9.0.2/32
-Endpoint = 162.159.192.2:2408
-PersistentKeepalive = 25
-EOF
-
-    echo -e "\n${GREEN}------------------------------------------------------------------------${NC}"
-    echo -e "${GREEN}[CONFIG 2] WITHOUT Cloudflare Anti-Flag (Standard Direct WireGuard)     ${NC}"
-    echo -e "${GREEN}------------------------------------------------------------------------${NC}"
-    cat << 'EOF'
-# --- Instance 1: Primary Ingest Gateway (Port 51820) [/etc/wireguard/wg0.conf] ---
-[Interface]
-Address = 10.8.0.1/24
-PrivateKey = <SERVER_INSTANCE_1_PRIVATE_KEY>
-ListenPort = 51820
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
-[Peer]
-# Broadcaster / OBS Studio Client
-PublicKey = <CLIENT_OBS_PUBLIC_KEY>
-AllowedIPs = 10.8.0.2/32
-
-[Peer]
-# Instance 2 Failover Peer (Direct Public IP)
-PublicKey = <SERVER_INSTANCE_2_PUBLIC_KEY>
-AllowedIPs = 10.8.0.3/32
-Endpoint = <INSTANCE_2_DIRECT_IP>:51821
-PersistentKeepalive = 25
-
-# --- Instance 2: Secondary Failover Gateway (Port 51821) [/etc/wireguard/wg1.conf] ---
-[Interface]
-Address = 10.9.0.1/24
-PrivateKey = <SERVER_INSTANCE_2_PRIVATE_KEY>
-ListenPort = 51821
-PostUp = iptables -A FORWARD -i wg1 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
-PostDown = iptables -D FORWARD -i wg1 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
-
-[Peer]
-# Broadcaster / OBS Studio Client
-PublicKey = <CLIENT_OBS_PUBLIC_KEY>
-AllowedIPs = 10.9.0.2/32
-Endpoint = <INSTANCE_1_DIRECT_IP>:51820
-PersistentKeepalive = 25
-EOF
-
-    echo -e "\nPress Enter to return to main menu..."
-    read -r
 }
 
 install_docker() {
@@ -1954,38 +1859,36 @@ while true; do
     echo -e "  Combined Chat Config Page: ${CHAT_CONFIG_URL}"
     echo -e "  Web Dashboard:   ${DASHBOARD_URL}"
     echo "-------------------------------------"
-    echo "1) Setup WireGuard Servers (Instances 1 & 2)"
-    echo "2) Install Docker (if not installed)"
-    echo "3) Configure Stream Keys (Horizontal)"
-    echo "4) Configure Stream Keys (Vertical)"
-    echo "5) Configure OBS Setup & Security Key"
-    echo "6) Configure IP Whitelist (Optional)"
-    echo "7) Configure Domain / Reverse Proxy (Optional)"
-    echo "8) Configure Optimizations (Chunk Size)"
-    echo "9) Configure NOALBS Scene Switcher"
-    echo "10) Build & Start Server"
-    echo "11) Run Integration Tests"
-    echo "12) Stop Server & Uninstall"
-    echo "13) View Logs"
-    echo "14) Quit"
+    echo "1) Install Docker (if not installed)"
+    echo "2) Configure Stream Keys (Horizontal)"
+    echo "3) Configure Stream Keys (Vertical)"
+    echo "4) Configure OBS Setup & Security Key"
+    echo "5) Configure IP Whitelist (Optional)"
+    echo "6) Configure Domain / Reverse Proxy (Optional)"
+    echo "7) Configure Optimizations (Chunk Size)"
+    echo "8) Configure NOALBS Scene Switcher"
+    echo "9) Build & Start Server"
+    echo "10) Run Integration Tests"
+    echo "11) Stop Server & Uninstall"
+    echo "12) View Logs"
+    echo "13) Quit"
     echo -e "Select an option: \c"
     read -r option
 
     case $option in
-        1) setup_wireguard_servers ;;
-        2) install_docker ;;
-        3) configure_keys ;;
-        4) configure_vertical_keys ;;
-        5) configure_obs ;;
-        6) configure_whitelist ;;
-        7) configure_domain ;;
-        8) configure_optimizations ;;
-        9) configure_noalbs ;;
-        10) build_and_run ;;
-        11) if [ -f "./integration_test.sh" ]; then chmod +x ./integration_test.sh; ./integration_test.sh; else echo -e "${RED}Test script not found.${NC}"; fi; echo -e "Press Enter to continue..."; read -r ;;
-        12) stop_and_uninstall ;;
-        13) view_logs ;;
-        14|q|Q) clear; echo -e "${GREEN}Goodbye!${NC}"; break ;;
+        1) install_docker ;;
+        2) configure_keys ;;
+        3) configure_vertical_keys ;;
+        4) configure_obs ;;
+        5) configure_whitelist ;;
+        6) configure_domain ;;
+        7) configure_optimizations ;;
+        8) configure_noalbs ;;
+        9) build_and_run ;;
+        10) if [ -f "./integration_test.sh" ]; then chmod +x ./integration_test.sh; ./integration_test.sh; else echo -e "${RED}Test script not found.${NC}"; fi; echo -e "Press Enter to continue..."; read -r ;;
+        11) stop_and_uninstall ;;
+        12) view_logs ;;
+        13|q|Q) clear; echo -e "${GREEN}Goodbye!${NC}"; break ;;
         *) echo -e "${RED}Invalid option${NC}"; sleep 1 ;;
     esac
 done
