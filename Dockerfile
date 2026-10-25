@@ -30,7 +30,7 @@ RUN echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99fast && \
         python3-pip \
         libpcre2-dev \
         zlib1g-dev && \
-    pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python && \
+    pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python defusedxml && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99fast
 

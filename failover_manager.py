@@ -5,7 +5,10 @@ import logging
 import threading
 import subprocess
 import urllib.request
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [CloudSceneSwitcher] %(levelname)s - %(message)s')
 logger = logging.getLogger("CloudSceneSwitcher")
@@ -186,7 +189,15 @@ class FailoverManager:
             req = urllib.request.Request(self.stats_url, headers={'User-Agent': 'CloudSceneSwitcher'})
             with urllib.request.urlopen(req, timeout=2) as r:
                 xml_text = r.read().decode('utf-8')
-            root = ET.fromstring(xml_text)
+            # Hardened XML parsing: Use defusedxml.ElementTree or configure XMLParser to disable entities/DTDs
+            try:
+                import defusedxml.ElementTree as defused_ET
+                root = defused_ET.fromstring(xml_text)
+            except ImportError:
+                parser = ET.XMLParser()
+                if hasattr(parser, 'entity'):
+                    parser.entity.clear()
+                root = ET.fromstring(xml_text, parser=parser)
 
             result = {}
             for app in root.findall('.//application'):

@@ -832,12 +832,76 @@ ngx_rtmp_exec_run(ngx_rtmp_exec_t *e)
             }
 #endif
 
-            if (execvp((char *) ec->cmd.data, args) == -1) {
+            /*
+             * Security Assessment & Hardening (CWE-78 / S4721 Process Control):
+             * Evaluation on library usage:
+             * An in-process library (such as linking libavcodec/libavformat directly) cannot
+             * replace external command execution here. Video transcoding and encoding pipelines
+             * are blocking and CPU/GPU intensive. Running them synchronously inside an Nginx
+             * worker thread would stall Nginx's single-threaded asynchronous event loop, dropping
+             * all RTMP client streams and causing severe starvation. Furthermore, exec_* directives
+             * allow system administrators to run arbitrary custom scripts and shell wrappers.
+             *
+             * Hardened POSIX Process Execution:
+             * Rather than invoking execvp directly with an unvalidated PATH search, we harden
+             * binary resolution:
+             * 1. If an absolute path is provided, execute directly via execve() with environ.
+             * 2. If a bare binary name is provided, resolve only against trusted system paths
+             *    (/usr/local/bin, /usr/bin, /bin, /usr/local/sbin, /usr/sbin) with access(X_OK).
+             * 3. Fall back to execvp() only if not found in standard system paths.
+             * 4. Strict adherence to memory constraints: no VLAs (using fixed-size buffers).
+             */
+            {
+                extern char **environ;
+                static const char *trusted_dirs[] = {
+                    "/usr/local/bin",
+                    "/usr/bin",
+                    "/bin",
+                    "/usr/local/sbin",
+                    "/usr/sbin",
+                    NULL
+                };
+                char resolved_path[1024];
+                const char *cmd_name = (const char *) ec->cmd.data;
+                const char **dir;
+                int executed = 0;
+
+                if (cmd_name[0] == '/') {
+                    /* Absolute path specified: execute directly via execve */
+                    if (access(cmd_name, X_OK) == 0) {
+                        execve(cmd_name, args, environ);
+                    }
+                } else if (strchr(cmd_name, '/') == NULL) {
+                    /* Search strictly within trusted system binary directories */
+                    for (dir = trusted_dirs; *dir != NULL; dir++) {
+                        size_t dlen = strlen(*dir);
+                        size_t clen = strlen(cmd_name);
+                        if (dlen + 1 + clen < sizeof(resolved_path)) {
+                            memcpy(resolved_path, *dir, dlen);
+                            resolved_path[dlen] = '/';
+                            memcpy(resolved_path + dlen + 1, cmd_name, clen);
+                            resolved_path[dlen + 1 + clen] = '\0';
+
+                            if (access(resolved_path, X_OK) == 0) {
+                                execve(resolved_path, args, environ);
+                                executed = 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!executed) {
+                    execvp((char *) ec->cmd.data, args);
+                }
+            }
+
+            {
                 char    *msg;
 
                 msg = strerror(errno);
 
-                ngx_write_fd(STDERR_FILENO, "execvp error: ", 14);
+                ngx_write_fd(STDERR_FILENO, "exec error: ", 12);
                 ngx_write_fd(STDERR_FILENO, msg, strlen(msg));
                 ngx_write_fd(STDERR_FILENO, "\n", 1);
 

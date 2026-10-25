@@ -340,6 +340,16 @@
 
         const currentHost = window.location.hostname || 'localhost';
 
+        function escapeHtml(str) {
+            if (typeof str !== 'string') return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function extractCleanHandle(input) {
             if (!input) return '';
             input = input.trim();
@@ -347,23 +357,24 @@
                 try {
                     const u = new URL(input.startsWith('http') ? input : 'https://' + input);
                     const v = u.searchParams.get('v');
-                    if (v && v.length === 11) return v;
+                    if (v && v.length === 11) return v.replace(/[^a-zA-Z0-9_-]/g, '');
                     const parts = u.pathname.split('/').filter(Boolean);
                     const handlePart = parts.find(p => p.startsWith('@'));
-                    if (handlePart) return handlePart.slice(1);
+                    if (handlePart) return handlePart.slice(1).replace(/[^a-zA-Z0-9_.-]/g, '');
                     if (parts[0] && parts[0] !== 'live' && parts[0] !== 'watch') {
-                        return parts[0] === 'c' || parts[0] === 'channel' || parts[0] === 'user' ? (parts[1] || parts[0]) : parts[0];
+                        const raw = parts[0] === 'c' || parts[0] === 'channel' || parts[0] === 'user' ? (parts[1] || parts[0]) : parts[0];
+                        return raw.replace(/[^a-zA-Z0-9_.-]/g, '');
                     }
                 } catch(e) {}
             }
-            return input.replace(/^@/, '').replace(/\/live\/?$/, '');
+            return input.replace(/^@/, '').replace(/\/live\/?$/, '').replace(/[^a-zA-Z0-9_.-]/g, '');
         }
 
         function extractVideoId(input) {
             if (!input) return '';
             input = input.trim();
             if (input.length === 11 && !input.startsWith('@') && !input.startsWith('UC') && !input.includes('/')) {
-                return input;
+                return input.replace(/[^a-zA-Z0-9_-]/g, '');
             }
             const m1 = input.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
             if (m1) return m1[1];
@@ -610,10 +621,21 @@
 
                 const header = document.createElement('div');
                 header.className = 'column-header';
-                header.innerHTML = `
-                    <span class="platform-badge platform-twitch" style="padding:2px 5px;">${TWITCH_SVG} Twitch</span>
-                    <a class="popout-btn" target="_blank" href="https://www.twitch.tv/popout/${encodeURIComponent(ch)}/chat">Popout ↗</a>
-                `;
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-twitch';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${TWITCH_SVG} Twitch`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.target = '_blank';
+                const safeTwitch = encodeURIComponent(ch.replace(/[^a-zA-Z0-9_]/g, ''));
+                popout.href = `https://www.twitch.tv/popout/${safeTwitch}/chat`;
+                popout.textContent = 'Popout ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
                 col.appendChild(header);
 
                 const iframe = document.createElement('iframe');
@@ -633,10 +655,22 @@
 
                 const header = document.createElement('div');
                 header.className = 'column-header';
-                header.innerHTML = `
-                    <span class="platform-badge platform-youtube" style="padding:2px 5px;">${YOUTUBE_SVG} YouTube</span>
-                    <a class="popout-btn" id="yt-popout" target="_blank" href="https://www.youtube.com/@${cleanHandle}/live">Live Page ↗</a>
-                `;
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-youtube';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${YOUTUBE_SVG} YouTube`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.id = 'yt-popout';
+                popout.target = '_blank';
+                const safeYtHandle = encodeURIComponent(cleanHandle);
+                popout.href = `https://www.youtube.com/@${safeYtHandle}/live`;
+                popout.textContent = 'Live Page ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
                 col.appendChild(header);
 
                 let currentIframe = null;
@@ -651,7 +685,10 @@
                     }
 
                     const popout = col.querySelector('#yt-popout');
-                    if (popout) popout.href = `https://www.youtube.com/live_chat?v=${videoId}`;
+                    if (popout) {
+                        const safeVid = encodeURIComponent(videoId.replace(/[^a-zA-Z0-9_-]/g, ''));
+                        popout.href = `https://www.youtube.com/live_chat?v=${safeVid}`;
+                    }
 
                     const iframe = document.createElement('iframe');
                     iframe.src = `https://www.youtube.com/live_chat?v=${encodeURIComponent(videoId)}&embed_domain=${encodeURIComponent(currentHost)}`;
@@ -664,25 +701,66 @@
                 } else {
                     const watcher = document.createElement('div');
                     watcher.className = 'yt-watcher-card';
-                    watcher.innerHTML = `
-                        <div class="yt-box">
-                            <div class="radar-spinner"></div>
-                            <div style="font-weight:700; font-size:14px; color:#f8fafc;">Waiting for YouTube Live Stream</div>
-                            <div style="font-size:12px; color:#ef4444; margin-top:4px; font-weight:600;">@${cleanHandle}</div>
-                            <div style="font-size:11px; color:#94a3b8; margin-top:8px; line-height:1.4;">
-                                Checking every 8s... As soon as you go live on YouTube, live chat will automatically load here.
-                            </div>
-                            <input class="yt-input" placeholder="Or paste Video ID e.g. jfKfPfyJRdk" />
-                            <button class="yt-btn">Load Live Chat</button>
-                            <a href="https://www.youtube.com/@${cleanHandle}/live" target="_blank" style="display:block; margin-top:10px; font-size:11px; color:#f59e0b; text-decoration:underline;">Open Channel Live Page</a>
-                        </div>
-                    `;
+
+                    const ytBox = document.createElement('div');
+                    ytBox.className = 'yt-box';
+
+                    const spinner = document.createElement('div');
+                    spinner.className = 'radar-spinner';
+                    ytBox.appendChild(spinner);
+
+                    const titleEl = document.createElement('div');
+                    titleEl.style.fontWeight = '700';
+                    titleEl.style.fontSize = '14px';
+                    titleEl.style.color = '#f8fafc';
+                    titleEl.textContent = 'Waiting for YouTube Live Stream';
+                    ytBox.appendChild(titleEl);
+
+                    const handleEl = document.createElement('div');
+                    handleEl.style.fontSize = '12px';
+                    handleEl.style.color = '#ef4444';
+                    handleEl.style.marginTop = '4px';
+                    handleEl.style.fontWeight = '600';
+                    handleEl.textContent = `@${cleanHandle}`; // Safe textContent escaping against XSS
+                    ytBox.appendChild(handleEl);
+
+                    const infoEl = document.createElement('div');
+                    infoEl.style.fontSize = '11px';
+                    infoEl.style.color = '#94a3b8';
+                    infoEl.style.marginTop = '8px';
+                    infoEl.style.lineHeight = '1.4';
+                    infoEl.textContent = 'Checking every 8s... As soon as you go live on YouTube, live chat will automatically load here.';
+                    ytBox.appendChild(infoEl);
+
+                    const inp = document.createElement('input');
+                    inp.className = 'yt-input';
+                    inp.placeholder = 'Or paste Video ID e.g. jfKfPfyJRdk';
+                    ytBox.appendChild(inp);
+
+                    const btn = document.createElement('button');
+                    btn.className = 'yt-btn';
+                    btn.textContent = 'Load Live Chat';
+                    ytBox.appendChild(btn);
+
+                    const liveLink = document.createElement('a');
+                    liveLink.target = '_blank';
+                    liveLink.style.display = 'block';
+                    liveLink.style.marginTop = '10px';
+                    liveLink.style.fontSize = '11px';
+                    liveLink.style.color = '#f59e0b';
+                    liveLink.style.textDecoration = 'underline';
+                    const safeEncHandle = encodeURIComponent(cleanHandle);
+                    liveLink.href = `https://www.youtube.com/@${safeEncHandle}/live`;
+                    liveLink.textContent = 'Open Channel Live Page';
+                    ytBox.appendChild(liveLink);
+
+                    watcher.appendChild(ytBox);
                     col.appendChild(watcher);
 
-                    const inp = watcher.querySelector('.yt-input');
-                    const btn = watcher.querySelector('.yt-btn');
-                    btn.onclick = () => {
-                        const vid = extractVideoId(inp.value);
+                    const inpEl = watcher.querySelector('.yt-input');
+                    const btnEl = watcher.querySelector('.yt-btn');
+                    btnEl.onclick = () => {
+                        const vid = extractVideoId(inpEl.value);
                         if (vid) loadYouTubeChat(vid);
                     };
 
@@ -714,10 +792,21 @@
 
                 const header = document.createElement('div');
                 header.className = 'column-header';
-                header.innerHTML = `
-                    <span class="platform-badge platform-kick" style="padding:2px 5px;">${KICK_SVG} Kick</span>
-                    <a class="popout-btn" target="_blank" href="https://kick.com/popout/${encodeURIComponent(ch)}/chat">Popout ↗</a>
-                `;
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-kick';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${KICK_SVG} Kick`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.target = '_blank';
+                const safeKick = encodeURIComponent(ch.replace(/[^a-zA-Z0-9_]/g, ''));
+                popout.href = `https://kick.com/popout/${safeKick}/chat`;
+                popout.textContent = 'Popout ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
                 col.appendChild(header);
 
                 const iframe = document.createElement('iframe');

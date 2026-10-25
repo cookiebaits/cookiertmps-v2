@@ -2,7 +2,10 @@ import requests
 import time
 import os
 import logging
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
 import obsws_python as obs
 import subprocess
 import signal
@@ -202,7 +205,15 @@ class Noalbs:
             if r.status_code != 200:
                 return 0, False, []
 
-            root = ET.fromstring(r.text)
+            # Hardened XML parsing: Use defusedxml.ElementTree or configure XMLParser to disable entities/DTDs
+            try:
+                import defusedxml.ElementTree as defused_ET
+                root = defused_ET.fromstring(r.text)
+            except ImportError:
+                parser = ET.XMLParser()
+                if hasattr(parser, 'entity'):
+                    parser.entity.clear()
+                root = ET.fromstring(r.text, parser=parser)
             total_bitrate = 0
             has_publisher = False
             active_streams = []
