@@ -6,7 +6,8 @@ import { CombinedChatTab } from './components/CombinedChatTab';
 import { DestinationsTab } from './components/DestinationsTab';
 import { TitlesAndEpisodeTab } from './components/TitlesAndEpisodeTab';
 import { SecurityAndValidatorTab } from './components/SecurityAndValidatorTab';
-import { NoalbsTab } from './components/NoalbsTab';
+import { ProtectionTab } from './components/ProtectionTab';
+import { AUTH_STORAGE_KEY } from './api';
 import { StatsMonitorTab } from './components/StatsMonitorTab';
 import { VPSInstallerTab } from './components/VPSInstallerTab';
 import { PasswordAuthModal } from './components/PasswordAuthModal';
@@ -148,7 +149,7 @@ export const App: React.FC = () => {
       .then((data) => {
         if (data && data.isPasswordProtected) {
           setIsPasswordProtected(true);
-          const savedAuth = localStorage.getItem('cookiertmps_stream_key_auth');
+          const savedAuth = localStorage.getItem(AUTH_STORAGE_KEY);
           if (savedAuth) {
             // Verify saved password
             verifyPassword(savedAuth, true);
@@ -178,13 +179,13 @@ export const App: React.FC = () => {
       const data = await resp.json();
       if (resp.ok && data.success) {
         setIsAuthenticated(true);
-        localStorage.setItem('cookiertmps_stream_key_auth', password);
+        localStorage.setItem(AUTH_STORAGE_KEY, password);
       } else {
         setIsAuthenticated(false);
         if (!isSilent) {
           setAuthError(data.message || 'Invalid Stream Key / Password');
         } else {
-          localStorage.removeItem('cookiertmps_stream_key_auth');
+          localStorage.removeItem(AUTH_STORAGE_KEY);
         }
       }
     } catch (e) {
@@ -195,7 +196,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('cookiertmps_stream_key_auth');
+    localStorage.removeItem(AUTH_STORAGE_KEY);
     setIsAuthenticated(false);
   };
 
@@ -240,7 +241,7 @@ export const App: React.FC = () => {
         {activeTab === 'destinations' && <DestinationsTab />}
         {activeTab === 'titles' && <TitlesAndEpisodeTab />}
         {activeTab === 'security' && <SecurityAndValidatorTab />}
-        {activeTab === 'noalbs' && <NoalbsTab />}
+        {activeTab === 'protection' && <ProtectionTab />}
         {activeTab === 'stats' && <StatsMonitorTab />}
         {activeTab === 'installer' && <VPSInstallerTab />}
       </main>
@@ -250,7 +251,7 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p>© 2026 CookieRTMPS Control Center — Hardened Nginx 1.30.3 & Local RTMP Module</p>
           <div className="flex items-center space-x-4 text-[11px] font-mono text-slate-400">
-            <span>Ports: 1935 (RTMP) / 8081 (Stat) / 3000 (UI)</span>
+            <span>Ports: 1935 (RTMP/RTMPS) / 80 (HTTP) / 443 (HTTPS)</span>
             <span>AMF Recursion: 128</span>
           </div>
         </div>

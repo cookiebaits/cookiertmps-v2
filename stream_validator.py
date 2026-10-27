@@ -1,4 +1,6 @@
 from flask import Flask, request, Response
+import hmac
+import json
 import os
 import logging
 from urllib.parse import parse_qs
@@ -142,11 +144,6 @@ def validate():
     if not client_ip:
         client_ip = '127.0.0.1'
 
-    # Key Check - Internal Cloud BRB stream is always allowed
-    if stream_key_attempt.startswith('cloud_brb'):
-        app.logger.info(f"ACCEPTED cloud_brb stream from {client_ip} (Key: {stream_key_attempt})")
-        return Response('OK', status=200)
-
     # IP Whitelist Check for external streams
     if ACCEPTED_IP and not is_ip_allowed(client_ip, ACCEPTED_IP):
         app.logger.warning(f"REJECTED IP: {client_ip}")
@@ -156,24 +153,7 @@ def validate():
         return Response('No keys configured', status=403)
 
     if stream_key_attempt in VALID_KEYS:
-        app.logger.info(f"ACCEPTED stream from {client_ip} (Key: {stream_key_attempt})")
-
-        # Automatically clear any active cloud_brb fallback publisher so user takes over with 0 collision
-        app_name = parsed_data.get('app', [''])[0] or os.getenv('APP_NAME', 'live')
-        try:
-            import urllib.request
-            for a in [app_name, 'vertical']:
-                drop_url = f"http://127.0.0.1:8081/control/drop/publisher?app={a}&name=cloud_brb_loop"
-                req = urllib.request.Request(drop_url, headers={'User-Agent': 'StreamValidator'})
-                urllib.request.urlopen(req, timeout=1)
-            app.logger.info(f"Cleared cloud_brb_loop on {app_name} and vertical for incoming live stream.")
-        except Exception:
-            pass
-
-        try:
-            subprocess.run(["pkill", "-f", "cloud_brb_loop"], timeout=1, check=False)
-        except Exception:
-            pass
+        app.logger.info(f"ACCEPTED stream from {client_ip}")
 
         # Update titles in background to not block Nginx
         threading.Thread(target=run_update_titles).start()
@@ -211,9 +191,6 @@ def publish_done():
         parsed_data = parse_qs(raw_data)
         app_name = parsed_data.get('app', [app_name])[0]
         stream_key = parsed_data.get('name', [stream_key])[0]
-
-    if stream_key.startswith('cloud_brb'):
-        return Response('OK', status=200)
 
     pusher_key = f"{app_name}_{stream_key}"
     
@@ -372,32 +349,78 @@ def get_chat_hex_key():
         key = 'c00k1e88'
     return Response(json.dumps({'hexKey': key}), mimetype='application/json')
 
+def json_response(payload, status=200):
+    return Response(json.dumps(payload), status=status, mimetype='application/json')
+
+def password_matches(candidate):
+    # The website password is the OBS stream key set in the installer menu.
+    obs_key = os.getenv('OBS_KEY', '').strip()
+    if not obs_key:
+        return False
+    return hmac.compare_digest(candidate.strip().encode(), obs_key.encode())
+
+def is_authorized():
+    return password_matches(request.headers.get('X-Stream-Key', ''))
+
+def unauthorized():
+    return json_response({'success': False, 'message': 'Stream key required'}, 401)
+
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
     obs_key = os.getenv('OBS_KEY', '').strip()
-    is_protected = bool(obs_key or VALID_KEYS)
-    return Response(json.dumps({
-        'isPasswordProtected': is_protected,
+    return json_response({
+        'isPasswordProtected': True,
         'hasObsKey': bool(obs_key),
-        'keyCount': len(VALID_KEYS)
-    }), mimetype='application/json')
+    })
 
 @app.route('/api/auth/verify', methods=['POST'])
 def auth_verify():
-    import json
     data = request.get_json(silent=True) or {}
-    password = (data.get('password') or '').strip()
-    obs_key = os.getenv('OBS_KEY', '').strip()
-    
-    # If no keys configured at all, no password required
-    if not obs_key and not VALID_KEYS:
-        return Response(json.dumps({'success': True, 'message': 'No password required'}), mimetype='application/json')
-    
-    # Check against OBS_KEY or any valid stream key in environment
-    if (obs_key and password == obs_key) or (password in VALID_KEYS):
-        return Response(json.dumps({'success': True}), mimetype='application/json')
-    
-    return Response(json.dumps({'success': False, 'message': 'Invalid Stream Key / Password'}), status=401, mimetype='application/json')
+    password = data.get('password') or ''
+    if not os.getenv('OBS_KEY', '').strip():
+        return json_response({'success': False, 'message': 'No stream key is set yet. Set one from the installer menu (Configure OBS stream key).'}, 401)
+    if isinstance(password, str) and password_matches(password):
+        return json_response({'success': True})
+    return json_response({'success': False, 'message': 'Invalid stream key'}, 401)
+
+@app.route('/api/episode', methods=['GET', 'POST'])
+def episode():
+    if not is_authorized():
+        return unauthorized()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        action = data.get('action')
+        with TITLE_LOCK:
+            count = get_episode_count()
+            if action == 'increment':
+                count += 1
+            elif action == 'decrement':
+                count = max(1, count - 1)
+            elif action == 'set' and isinstance(data.get('count'), int) and 1 <= data['count'] <= 100000:
+                count = data['count']
+            else:
+                return json_response({'success': False, 'message': 'Invalid action'}, 400)
+            try:
+                with open(EPISODE_FILE, 'w') as f:
+                    f.write(str(count))
+            except OSError as e:
+                app.logger.error(f"Error writing episode count: {e}")
+                return json_response({'success': False, 'message': 'Could not save episode count'}, 500)
+        return json_response({'success': True, 'count': count})
+    return json_response({'count': get_episode_count()})
+
+@app.route('/api/protection', methods=['GET'])
+def protection_status():
+    if not is_authorized():
+        return unauthorized()
+    try:
+        with open(os.getenv('PROTECTION_STATUS_FILE', '/tmp/stream_protection.json')) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return json_response({'running': False})
+    data['running'] = True
+    data['videoUrl'] = os.getenv('BRB_VIDEO_URL', '')
+    return json_response(data)
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8082, debug=False)

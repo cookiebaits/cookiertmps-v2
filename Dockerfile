@@ -30,7 +30,7 @@ RUN echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99fast && \
         python3-pip \
         libpcre2-dev \
         zlib1g-dev && \
-    pip3 install --no-cache-dir --break-system-packages flask gunicorn requests obsws-python defusedxml && \
+    pip3 install --no-cache-dir --break-system-packages flask gunicorn requests defusedxml && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99fast
 
@@ -66,6 +66,15 @@ RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
     ln -sf /dev/stdout /var/log/nginx/access.log && \
     ln -sf /dev/stderr /var/log/nginx/error.log
 
+# 2b. MediaMTX (serves the looping backup video during disconnects / low bitrate)
+ENV MEDIAMTX_VERSION=v1.21.3
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in amd64) MTX_ARCH=amd64 ;; arm64) MTX_ARCH=arm64 ;; armhf) MTX_ARCH=armv7 ;; *) echo "Unsupported arch $ARCH"; exit 1 ;; esac && \
+    wget -qO /tmp/mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" && \
+    tar -xzf /tmp/mediamtx.tar.gz -C /usr/local/bin mediamtx && \
+    chmod +x /usr/local/bin/mediamtx && \
+    rm /tmp/mediamtx.tar.gz
+
 # 3. Configure Stunnel
 RUN mkdir -p /etc/stunnel/conf.d
 COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
@@ -83,12 +92,9 @@ COPY chat.html /usr/local/nginx/html/chat.html
 # 5. App scripts and configuration (layer caching ensures updates rebuild in <1s)
 COPY nginx/nginx.conf.template /etc/nginx/nginx.conf.template
 COPY stream_validator.py /app/stream_validator.py
-COPY failover_manager.py /app/failover_manager.py
+COPY stream_protection.py /app/stream_protection.py
 COPY update_titles.py /app/update_titles.py
 COPY tiktok_pusher.py /app/tiktok_pusher.py
-COPY test_noalbs.py /app/test_noalbs.py
-COPY test_failover.py /app/test_failover.py
-COPY noalbs /app/noalbs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

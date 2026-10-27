@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { authFetch } from '../api';
 import { Type, Plus, Minus, RefreshCw, Check, Sparkles, Key, AlertCircle } from 'lucide-react';
 
 export const TitlesAndEpisodeTab: React.FC = () => {
@@ -14,7 +15,7 @@ export const TitlesAndEpisodeTab: React.FC = () => {
   const formattedTitle = `${baseTitle} | Ep.${episodeCount} | ${currentDateStr}`;
 
   useEffect(() => {
-    fetch('/api/episode')
+    authFetch('/api/episode')
       .then((res) => res.json())
       .then((data) => {
         if (data && typeof data.count === 'number') {
@@ -33,7 +34,7 @@ export const TitlesAndEpisodeTab: React.FC = () => {
     setEpisodeCount(newCount);
 
     try {
-      await fetch('/api/episode', {
+      await authFetch('/api/episode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, count: newCount }),

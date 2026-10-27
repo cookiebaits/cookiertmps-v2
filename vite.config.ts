@@ -16,16 +16,10 @@ export default defineConfig({
       name: 'cookie-rtmps-api-emulator',
       configureServer(server) {
         let episodeCount = 1;
-        let validKeys: Record<string, string> = {
-          youtube: 'yt_live_key_sample123',
-          twitch: 'live_tw_abc987654321',
-          kick: 'sk_us_kick_9988776655',
-          tiktok: 'auto',
-          x: 'x_live_stream_key_1122',
-          facebook: '',
-          instagram: '',
-        };
         let activePushers: string[] = [];
+        const mockObsKey = 'cookiepass';
+        const isAuthorized = (req: { headers: Record<string, string | string[] | undefined> }) =>
+          req.headers['x-stream-key'] === mockObsKey;
 
         server.middlewares.use(async (req, res, next) => {
           const url = req.url || '';
@@ -278,7 +272,40 @@ export default defineConfig({
             return;
           }
 
+          if (url.startsWith('/api/protection')) {
+            res.setHeader('Content-Type', 'application/json');
+            if (!isAuthorized(req)) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'Unauthorized' }));
+              return;
+            }
+            const cycle = Math.floor(Date.now() / 1000) % 40;
+            const inBackup = cycle >= 25;
+            res.end(JSON.stringify({
+              running: true,
+              enabled: true,
+              lowBitrateKbps: 1000,
+              restoreBitrateKbps: 1500,
+              timeoutSeconds: 30,
+              videoUrl: 'https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4',
+              updatedAt: Date.now() / 1000,
+              channels: {
+                horizontal: inBackup
+                  ? { state: 'backup', kbps: 420, backupElapsed: cycle - 25, lastEvent: 'Bitrate below 1000 kbps - backup video playing' }
+                  : { state: 'live', kbps: 6000 + Math.round(Math.random() * 400), backupElapsed: 0, lastEvent: 'Stream live' },
+                vertical: { state: 'idle', kbps: null, backupElapsed: 0, lastEvent: 'Waiting for stream' },
+              },
+            }));
+            return;
+          }
+
           if (url.startsWith('/api/episode')) {
+            if (!isAuthorized(req)) {
+              res.statusCode = 401;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Unauthorized' }));
+              return;
+            }
             if (req.method === 'POST') {
               let body = '';
               req.on('data', chunk => body += chunk);
@@ -311,7 +338,7 @@ export default defineConfig({
                 const key = params.get('name') || '';
                 const appName = params.get('app') || 'live';
                 
-                if (key.startsWith('cloud_brb') || Object.values(validKeys).includes(key) || key === 'test_master_key') {
+                if (key === mockObsKey) {
                   if (appName === 'live' && !activePushers.includes('horizontal')) {
                     activePushers.push('horizontal');
                   }
@@ -337,9 +364,8 @@ export default defineConfig({
           if (url.startsWith('/api/auth/status')) {
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({
-              isPasswordProtected: Object.values(validKeys).some(Boolean),
+              isPasswordProtected: true,
               hasObsKey: true,
-              keyCount: Object.values(validKeys).filter(Boolean).length
             }));
             return;
           }
@@ -352,8 +378,7 @@ export default defineConfig({
                 try {
                   const data = JSON.parse(body || '{}');
                   const password = (data.password || '').trim();
-                  const allValid = Object.values(validKeys).filter(Boolean);
-                  if (allValid.length === 0 || allValid.includes(password) || password === 'test_master_key' || password === 'cookiepass') {
+                  if (password === mockObsKey) {
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ success: true }));
                   } else {

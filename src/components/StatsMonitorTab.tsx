@@ -25,7 +25,7 @@ export const StatsMonitorTab: React.FC = () => {
             <span>Nginx RTMP Relay & Bandwidth Diagnostic Monitor</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time telemetry parsed from <code className="text-amber-300 font-mono">http://127.0.0.1:8081/stat</code> (<code className="text-slate-300">ngx_rtmp_stat_module</code>).
+            Real-time telemetry read privately on the server from the Nginx RTMP stats module (not exposed to the internet).
           </p>
         </div>
 

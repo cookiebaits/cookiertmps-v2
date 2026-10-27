@@ -21,19 +21,14 @@ You send **one** high-quality feed to your VPS, and CookieRTMPS handles validati
 * **The Obscurity Trap:** Many relays rely on obfuscated RTMP stream endpoints as their only defense. If the URL is intercepted, anyone can hijack your ingest and broadcast to your channels.
 * **The CookieRTMPS Standard:** Ingest keys are strictly checked against destination keys or a dedicated Master Ingest Key in real time via an embedded Python/Flask validator. Streams failing verification are instantly rejected at the socket level.
 
-### 2. Built-in Cloud BRB & Disconnection Protection (NOALBS Scene Switcher)
-* **100% Server-Side Fallback:** No auxiliary OBS PC or second streaming machine required!
-* If your local connection drops below your **Low Bitrate Threshold** (e.g., 1000 kbps) or OBS disconnects entirely:
-  * CookieRTMPS immediately takes over and broadcasts a formatted **Cloud BRB `.mp4` video on loop** directly to all configured platforms.
-  * Loops continuously for the duration of the configured **Disconnection Protection Duration** (e.g., 300 seconds).
-  * Automatically switches back the instant your primary live stream reconnects!
-* **Broadcast-Standard MP4 Transcoding:**
-  * Strict video profile: **H.264 High Profile (Level 4.1, `yuv420p`)**.
-  * Constant **60 FPS** with closed GOP (`-g 60 -keyint_min 60 -sc_threshold 0`).
-  * CBR stream targeting **6000 kbps** (`-b:v 6000k -maxrate 6000k -bufsize 6000k`).
-  * Broadcast-grade audio: **AAC stereo @ 48,000 Hz, 160 kbps**.
-  * MP4 faststart container (`-movflags +faststart`) to eliminate playback buffering.
-  * Supports custom HTTP/HTTPS download URLs or local `.mp4` files on your server.
+### 2. Server-Side Disconnection Protection (Backup Video)
+* **100% Server-Side:** No OBS WebSocket, NOALBS, or second PC required. Uses MediaMTX's always-available fallback, a proven method for keeping outputs alive.
+* If your incoming bitrate falls below your **Low Bitrate Threshold** (kbps) for 3 seconds, or OBS disconnects entirely:
+  * The server instantly switches every platform to your **backup `.mp4` (set by URL) on loop**, without the platforms ever seeing a disconnect.
+  * It switches back to your live feed once your bitrate holds above the **Restore Bitrate** for 3 seconds.
+  * If you are not back within the **Timeout** (seconds), the backup stops and the broadcast to all platforms ends.
+* All settings are in installer option **8) Configure Disconnection Protection**. Live status is visible on the website's "Disconnection Protection" tab.
+* The backup video is automatically converted at startup (H.264 + AAC 48 kHz stereo) so it plays cleanly on every platform.
 
 ### 3. Password-Protected Combined Chat Config Page
 * Access URL: `http://{your_vps_ip}/{8-character-hex}` (or via reverse proxy domain: `https://yourdomain.com/{8-character-hex}`).
@@ -97,19 +92,19 @@ The installer provides a clean, numbered menu:
 
 | # | Menu Option | Description |
 |---|---|---|
-| **1** | **Install Docker & Dependencies** | Sets up Docker CE, Docker Compose, Git, Curl, FFmpeg, and Python tools. |
-| **2** | **Configure Horizontal Stream Destinations** | Setup Twitch, YouTube, Kick, Facebook, Trovo, TikTok, X, and Custom RTMP targets. |
-| **3** | **Configure Vertical Stream Destinations** | Setup independent feeds for TikTok, YouTube Shorts, Instagram, and custom vertical targets. |
-| **4** | **Configure OBS Setup & Ingest Security** | Set Master OBS stream key password (also locks the Combined Chat Config page). |
-| **5** | **Configure Server Performance & Chunk Size** | Optimize Nginx `chunk_size` (default: 8192 for high-bitrate 1080p60 stability). |
-| **6** | **Configure Network & IP Whitelist** | Restrict ingest to your ISP/VPN IP or leave open for dynamic IP broadcasting. |
-| **7** | **Configure Titles & Chat Credentials** | Setup Twitch/YouTube OAuth tokens and automated episode incrementing. |
-| **8** | **Configure Domain / Reverse Proxy** | Configure custom domains, Cloudflare Real IP headers, and SSL for chat & stats. |
-| **9** | **Configure RTMPS Stunnel Proxy Ports** | Manage internal Stunnel proxy mappings (19350–19358) for CDN targets. |
-| **10** | **Configure NOALBS Scene Switcher** | Enable Cloud BRB failover, set Low Bitrate Threshold, Disconnect Duration, and format MP4 video. |
-| **11** | **Build & Start Server** | Compiles Nginx, builds Docker image, writes web configs, and boots the container. |
-| **12** | **Stop Server & Complete Clean Uninstall** | Completely stops container, unbinds ports, and removes web files & host configs. |
-| **0** | **Exit** | Exits the configuration menu. |
+| **1** | **Install Docker** | Sets up Docker and required tools. |
+| **2** | **Configure Stream Keys (Horizontal)** | Setup Twitch, YouTube, Kick, Facebook, Trovo, TikTok, X, and Custom RTMP targets. |
+| **3** | **Configure Stream Keys (Vertical)** | Setup independent feeds for TikTok, YouTube Shorts, Instagram, and custom vertical targets. |
+| **4** | **Configure OBS Setup & Security Key** | Set the OBS stream key (required). This is also the website password. |
+| **5** | **Configure IP Whitelist** | Restrict ingest to your IP or leave open. |
+| **6** | **Configure Website Address / Cloudflare Reverse Proxy** | Use the VPS IP (default) or a Cloudflare-proxied domain for the settings site. |
+| **7** | **Configure Optimizations** | Nginx `chunk_size` tuning. |
+| **8** | **Configure Disconnection Protection** | On/off, backup MP4 URL, low/restore bitrate (kbps), and timeout (seconds). |
+| **9** | **Build & Start Server** | Builds the Docker image and starts the server. |
+| **10** | **Run Integration Tests** | Verifies the server, protection engine, and website are running. |
+| **11** | **Stop Server & Uninstall** | Stops the container and removes host configs. |
+| **12** | **View Logs** | Shows server logs. |
+| **13** | **Quit** | Exits the menu. |
 
 ---
 
@@ -175,10 +170,11 @@ This guarantees seamless platform acceptance with zero stream tearing or reconne
 | Issue | Cause | Solution |
 |---|---|---|
 | **Stream Rejected ("Invalid Stream Key")** | Key sent from OBS does not match server config. | Verify your OBS Stream Key matches your Option 4 settings or destination keys. Check `docker logs cookie-rtmps`. |
-| **Chat Page Returns 404** | Web server not built or incorrect randomized hex. | Ensure Option 11 completed successfully. Check the Quick Reference URL printed at the end of deployment. |
+| **Chat Page Returns 404** | Web server not built or incorrect randomized hex. | Ensure Option 9 completed successfully. Check the Quick Reference URL printed at the end of deployment. |
 | **Chat Page Password Prompt** | Stream key password is enabled. | Enter the exact Stream Key configured in Option 4. |
 | **Stream Buffering / Dropping Frames** | Bandwidth congestion between OBS and VPS, or VPS and platform. | Adjust chunk size in Option 5, or lower OBS output bitrate (e.g., from 8000k to 6000k). |
-| **NOALBS Video Not Looping** | Missing or non-compliant MP4 file. | Run Option 10 > Select BRB Video to trigger the automatic FFmpeg broadcast transcoder. |
+| **Backup Video Not Playing** | Backup MP4 URL unreachable, or first-start conversion still running. | Check the URL in Option 8, then view logs (Option 12) for `[Protection]` messages. |
+| **Cloudflare Domain Not Loading** | DNS record not proxied or SSL mode wrong. | Set the A record to the VPS IP with the orange cloud on, and SSL/TLS mode to "Full". RTMP must still use the VPS IP. |
 
 ---
 

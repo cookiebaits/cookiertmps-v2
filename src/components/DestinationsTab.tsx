@@ -49,7 +49,8 @@ export const DestinationsTab: React.FC = () => {
   --name cookie-rtmps \\
   --restart unless-stopped \\
   -p 1935:1935 \\
-  -p 8081:8081 \\
+  -p 80:80 \\
+  -p 443:8443 \\
   -v ./data:/app/data \\
   ${envFlags || '-e YOUTUBE_KEY="your_key"'} \\
   cookiebaits/cookie-rtmps:latest`;

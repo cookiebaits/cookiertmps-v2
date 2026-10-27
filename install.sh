@@ -50,14 +50,14 @@ handle_existing_instance_upgrade() {
                 cp -ru "$SOURCE_DIR/cookie-nginx-rtmp" . 2>/dev/null || true
             fi
             # 2. Core installer and server scripts
-            local CORE_FILES=("install.sh" "Dockerfile" "docker-entrypoint.sh" "stream_validator.py" "failover_manager.py")
+            local CORE_FILES=("install.sh" "Dockerfile" "docker-entrypoint.sh" "stream_validator.py" "stream_protection.py" "integration_test.sh")
             for f in "${CORE_FILES[@]}"; do
                 if [ -f "$SOURCE_DIR/$f" ]; then
                     cp -u "$SOURCE_DIR/$f" . 2>/dev/null || true
                 fi
             done
             # 3. Core streaming config directories
-            local CORE_DIRS=("nginx" "stunnel" "noalbs")
+            local CORE_DIRS=("nginx" "stunnel")
             for d in "${CORE_DIRS[@]}"; do
                 if [ -d "$SOURCE_DIR/$d" ]; then
                     cp -ru "$SOURCE_DIR/$d" . 2>/dev/null || true
@@ -144,23 +144,21 @@ CHAT_HEX_KEY=""
 
 # Host Port Settings
 PORT_RTMP="1935"
-PORT_HTTP="81"
-PORT_HTTPS="8443"
+PORT_HTTP="80"
+PORT_HTTPS="443"
 PORT_STATS="8081"
 
-# NOALBS Settings
+# Website address
+CLOUDFLARE_PROXY="false"
+DOMAIN_PROMPTED="false"
+
+# Disconnection Protection (NOALBS_ENABLED kept as the setting name for saved configs)
 NOALBS_ENABLED="true"
-FALLBACK_MODE="video"
-OBS_WS_HOST="127.0.0.1"
-OBS_WS_PORT="4455"
-OBS_WS_PASSWORD=""
-OBS_SCENE_LIVE="Main"
-OBS_SCENE_BRB="BRB"
 LOW_BITRATE="1000"
 RESTORE_BITRATE="1500"
-CLOUD_BRB="true"
 BRB_VIDEO_URL=""
 CLOUD_BRB_TIMEOUT="300"
+DEFAULT_BRB_VIDEO_URL="https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
 
 CONFIG_FILE="rtmp_config.env"
 
@@ -168,6 +166,10 @@ CONFIG_FILE="rtmp_config.env"
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
+
+# Older installs served the website on 81/8443; it now lives on the standard 80/443.
+[ "$PORT_HTTP" == "81" ] && PORT_HTTP="80"
+[ "$PORT_HTTPS" == "8443" ] && PORT_HTTPS="443"
 
 save_config() {
     cat <<ENV_EOF > "$CONFIG_FILE"
@@ -224,16 +226,11 @@ STREAM_BASE_TITLE="$STREAM_BASE_TITLE"
 TWITCH_CLIENT_ID="$TWITCH_CLIENT_ID"
 TWITCH_OAUTH_TOKEN="$TWITCH_OAUTH_TOKEN"
 TWITCH_BROADCASTER_ID="$TWITCH_BROADCASTER_ID"
+CLOUDFLARE_PROXY="$CLOUDFLARE_PROXY"
+DOMAIN_PROMPTED="$DOMAIN_PROMPTED"
 NOALBS_ENABLED="$NOALBS_ENABLED"
-FALLBACK_MODE="$FALLBACK_MODE"
-OBS_WS_HOST="$OBS_WS_HOST"
-OBS_WS_PORT="$OBS_WS_PORT"
-OBS_WS_PASSWORD="$OBS_WS_PASSWORD"
-OBS_SCENE_LIVE="$OBS_SCENE_LIVE"
-OBS_SCENE_BRB="$OBS_SCENE_BRB"
 LOW_BITRATE="$LOW_BITRATE"
 RESTORE_BITRATE="$RESTORE_BITRATE"
-CLOUD_BRB="$CLOUD_BRB"
 BRB_VIDEO_URL="$BRB_VIDEO_URL"
 CLOUD_BRB_TIMEOUT="$CLOUD_BRB_TIMEOUT"
 PORT_RTMP="$PORT_RTMP"
@@ -838,34 +835,30 @@ configure_vertical_keys() {
 configure_obs() {
     clear
     echo -e "${GREEN}=== OBS Configuration ===${NC}"
-    # Determine the public IP if possible, or fallback to placeholder
-    SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
-
-    # Use Domain if set, otherwise IP
-    DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
+    build_site_urls
 
     echo -e "To stream to this server from OBS or another encoder:"
-    echo -e "  ${YELLOW}Horizontal URL:${NC} rtmp://${DISPLAY_HOST}:${PORT_RTMP}/${APP_NAME}"
-    echo -e "  ${YELLOW}Vertical URL:${NC}   rtmp://${DISPLAY_HOST}:${PORT_RTMP}/vertical"
+    echo -e "  ${YELLOW}Horizontal URL:${NC} rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}"
+    echo -e "  ${YELLOW}Vertical URL:${NC}   rtmp://${SERVER_IP}:${PORT_RTMP}/vertical"
     echo ""
     echo -e "--- Combined Chat ---"
     echo -e "You can use the combined chat as a browser source in OBS:"
-    echo -e "  ${YELLOW}URL:${NC} http://${DISPLAY_HOST}/chat.html?twitch=YOUR_CHANNEL&youtube=YOUR_CHANNEL"
+    echo -e "  ${YELLOW}URL:${NC} ${DASHBOARD_URL}chat.html?twitch=YOUR_CHANNEL&youtube=YOUR_CHANNEL"
     echo -e "  (Replace YOUR_CHANNEL as needed)"
     echo ""
     echo -e "--- Security Key & Combined Chat Password ---"
     echo -e "CookieRTMPS requires a matching stream key to accept your stream."
-    echo -e "${YELLOW}Note: This Stream Key also acts as the security password to unlock the Combined Chat Config Page.${NC}"
-    echo -e "      If no stream key is set, the Combined Chat Config Page will remain open without password protection."
-    echo -e "Current Custom OBS Key: ${OBS_KEY:-None}"
-    echo -e "Enter new Custom OBS Key (Type 'disable' to remove, or press Enter to keep current): "
+    echo -e "${YELLOW}Note: This Stream Key is also the password for the settings website.${NC}"
+    echo -e "Current Stream Key: ${OBS_KEY:-None}"
+    echo -e "Enter new Stream Key (8+ letters/numbers/-/_, or press Enter to keep current): "
     read -r obs_input
-    if [ "$obs_input" == "disable" ] || [ "$obs_input" == "DISABLE" ]; then
-        OBS_KEY=""
-        echo -e "${GREEN}Custom OBS Key removed (Combined Chat page unlocked).${NC}"
-    elif [ ! -z "$obs_input" ]; then
-        OBS_KEY="$obs_input"
-        echo -e "${GREEN}Custom OBS Key updated (Set as password for Combined Chat page).${NC}"
+    if [ -n "$obs_input" ]; then
+        if [[ "$obs_input" =~ ^[A-Za-z0-9_-]{8,}$ ]]; then
+            OBS_KEY="$obs_input"
+            echo -e "${GREEN}Stream Key updated (also the settings website password).${NC}"
+        else
+            echo -e "${RED}Invalid stream key. Keeping current.${NC}"
+        fi
     fi
 
     echo ""
@@ -891,27 +884,62 @@ configure_obs() {
 
 configure_domain() {
     clear
-    echo -e "${GREEN}=== Domain / Reverse Proxy Configuration ===${NC}"
-    echo -e "Current Domain: ${SERVER_DOMAIN:-None (Using IP)}"
-    echo -e "Enter your domain or Cloudflare reverse proxy (e.g. stream.yourdomain.com):"
-    echo -e "(Leave blank to keep current, type 'disable' to use IP)"
-    read -r dom_input
-    if [ "$dom_input" == "disable" ] || [ "$dom_input" == "DISABLE" ]; then
-        SERVER_DOMAIN=""
-        echo -e "${GREEN}Domain disabled, using IP.${NC}"
-    elif [ ! -z "$dom_input" ]; then
-        # Basic sanitization for domain
-        dom_input=$(echo "$dom_input" | sed 's/[^a-zA-Z0-9.-]//g')
-        if [ ! -z "$dom_input" ]; then
-            SERVER_DOMAIN="$dom_input"
-            echo -e "${GREEN}Domain updated to: $SERVER_DOMAIN${NC}"
-            echo -e "${YELLOW}Note: If using Cloudflare, ensure the record is 'DNS Only' (Grey Cloud).${NC}"
-        else
-            echo -e "${RED}Invalid domain name. Keeping current.${NC}"
-        fi
-    fi
+    echo -e "${GREEN}=== Website Address / Cloudflare Reverse Proxy ===${NC}"
+    echo -e "By default the settings website is reachable at your VPS IP: http://${SERVER_IP}/"
+    echo -e "Current domain: ${SERVER_DOMAIN:-None (using VPS IP)}"
+    echo -e "Cloudflare proxy: $([ "$CLOUDFLARE_PROXY" == "true" ] && echo "ON" || echo "OFF")"
+    echo ""
+    echo -e "Do you want to set up a Cloudflare reverse proxy (domain) for the settings website?"
+    echo "1) Yes, use a Cloudflare domain"
+    echo "2) No, use the VPS IP address"
+    echo "3) Keep current setting"
+    echo -e "Selection: \c"
+    read -r cf_choice
+    case $cf_choice in
+        1)
+            echo -e "Enter the domain or subdomain (e.g. stream.yourdomain.com):"
+            read -r dom_input
+            dom_input=$(echo "$dom_input" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]//g')
+            if [[ "$dom_input" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
+                SERVER_DOMAIN="$dom_input"
+                CLOUDFLARE_PROXY="true"
+                echo -e "${GREEN}Domain set to: $SERVER_DOMAIN${NC}"
+                echo ""
+                echo -e "${YELLOW}In your Cloudflare dashboard:${NC}"
+                echo -e "  1. DNS: add an 'A' record for ${SERVER_DOMAIN} pointing to ${SERVER_IP}, Proxy status ON (orange cloud)."
+                echo -e "  2. SSL/TLS: set encryption mode to 'Full'."
+                echo -e "  3. Website: https://${SERVER_DOMAIN}/  (served on ports 80/443 of this VPS)"
+                echo -e "  Note: Cloudflare's proxy does not carry RTMP. Point OBS at the VPS IP"
+                echo -e "        (rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}) or use a separate grey-cloud record for streaming."
+            else
+                echo -e "${RED}That is not a valid domain. Keeping current setting.${NC}"
+            fi
+            ;;
+        2)
+            SERVER_DOMAIN=""
+            CLOUDFLARE_PROXY="false"
+            echo -e "${GREEN}The settings website will use the VPS IP: http://${SERVER_IP}/${NC}"
+            ;;
+    esac
+    DOMAIN_PROMPTED="true"
     save_config
-    sleep 2
+    echo -e "Press Enter to continue..."
+    read -r
+}
+
+require_stream_key() {
+    while [ -z "$OBS_KEY" ]; do
+        echo -e "${YELLOW}A stream key is required. It is what OBS uses to stream to this server,${NC}"
+        echo -e "${YELLOW}and it is also the password for the settings website.${NC}"
+        echo -e "Enter a stream key (at least 8 characters, letters/numbers/-/_ only):"
+        read -r obs_input
+        if [[ "$obs_input" =~ ^[A-Za-z0-9_-]{8,}$ ]]; then
+            OBS_KEY="$obs_input"
+            save_config
+        else
+            echo -e "${RED}Invalid stream key.${NC}"
+        fi
+    done
 }
 
 configure_whitelist() {
@@ -1066,9 +1094,8 @@ configure_chat() {
                 save_config
                 ;;
             5)
-                SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
-                DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
-                CHAT_URL="http://${DISPLAY_HOST}/chat.html?mode=unified&"
+                build_site_urls
+                CHAT_URL="${DASHBOARD_URL}chat.html?mode=unified&"
                 if [ ! -z "$CHAT_TWITCH" ]; then CHAT_URL="${CHAT_URL}twitch=${CHAT_TWITCH}&"; fi
                 if [ ! -z "$CHAT_YOUTUBE" ]; then CHAT_URL="${CHAT_URL}youtube=${CHAT_YOUTUBE}&"; fi
                 if [ ! -z "$CHAT_KICK" ]; then CHAT_URL="${CHAT_URL}kick=${CHAT_KICK}&"; fi
@@ -1077,9 +1104,9 @@ configure_chat() {
                 echo -e "${GREEN}1) OBS Browser Source URL (Unified 1-Window Overlay):${NC}"
                 echo -e "   ${CYAN}${CHAT_URL%&}${NC}"
                 echo -e "${GREEN}2) Web Control Dashboard (Full Preview Site):${NC}"
-                echo -e "   ${CYAN}http://${DISPLAY_HOST}/${NC}"
+                echo -e "   ${CYAN}${DASHBOARD_URL}${NC}"
                 echo -e "${GREEN}3) Multi-Column Grid View:${NC}"
-                echo -e "   ${CYAN}http://${DISPLAY_HOST}/chat.html?mode=columns${NC}"
+                echo -e "   ${CYAN}${DASHBOARD_URL}chat.html?mode=columns${NC}"
                 echo -e "\nPress Enter to continue..."
                 read -r
                 ;;
@@ -1089,249 +1116,85 @@ configure_chat() {
     done
 }
 
-ensure_brb_video_transcoded() {
-    local source_input="${1:-$BRB_VIDEO_URL}"
-    local target="./data/brb_video.mp4"
-    if [ -z "$source_input" ]; then
-        source_input="https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
-    fi
-    mkdir -p ./data
-    rm -f "$target"
-
-    if [[ "$source_input" =~ ^https?:// ]] || [[ "$source_input" =~ ^ftp:// ]]; then
-        echo -e "${YELLOW}Downloading NOALBS Scene Switcher MP4 from: $source_input ...${NC}"
-        curl -L -f --retry 3 --connect-timeout 15 "$source_input" -o "${target}.tmp"
-    elif [ -f "$source_input" ]; then
-        echo -e "${YELLOW}Using local MP4 source file: $source_input ...${NC}"
-        cp "$source_input" "${target}.tmp"
-    else
-        echo -e "${RED}Invalid video source or file not found: $source_input${NC}"
-        return 1
-    fi
-
-    if [ -f "${target}.tmp" ] && [ -s "${target}.tmp" ]; then
-        if command -v ffmpeg &> /dev/null; then
-            echo -e "${YELLOW}Transcoding MP4 for NOALBS broadcast standard (H.264 Main/High, YUV420P, 60fps CBR GOP, AAC 48kHz Stereo, +faststart)...${NC}"
-
-            local duration=""
-            if command -v ffprobe &> /dev/null; then
-                duration=$(ffprobe -v error -show_entries format=duration -of default=noprintwrappers=1:nokey=1 "${target}.tmp" 2>/dev/null || true)
-            fi
-            if [ -z "$duration" ] || [ "$(awk -v d="$duration" 'BEGIN { print (d > 0) ? 1 : 0 }' 2>/dev/null)" -ne 1 ]; then
-                local dur_str
-                dur_str=$(ffmpeg -i "${target}.tmp" 2>&1 | grep "Duration" | awk '{print $2}' | tr -d ',')
-                if [ -n "$dur_str" ]; then
-                    duration=$(echo "$dur_str" | awk -F: '{ print ($1 * 3600) + ($2 * 60) + $3 }')
-                fi
-            fi
-
-            local has_audio=""
-            if command -v ffprobe &> /dev/null; then
-                has_audio=$(ffprobe -v error -select_streams a -show_entries stream=codec_name -of default=noprintwrappers=1:nokey=1 "${target}.tmp" 2>/dev/null || true)
-            fi
-
-            local audio_args=()
-            local map_args=()
-            if [ -n "$has_audio" ]; then
-                echo -e "${GREEN}Detected source audio track (${has_audio}). Normalizing to broadcast 48kHz Stereo AAC standard...${NC}"
-            else
-                echo -e "${GREEN}Embedding broadcast 48kHz Stereo AAC audio stream (Twitch, YouTube & Kick compliance)...${NC}"
-                audio_args=("-f" "lavfi" "-i" "anullsrc=channel_layout=stereo:sample_rate=48000")
-                map_args=("-map" "0:v:0" "-map" "1:a:0" "-shortest")
-            fi
-
-            # Strict broadcast formatting:
-            # - Profile High, Level 4.1, yuv420p
-            # - Fixed 60fps frame rate (-r 60) with 2-second closed GOP (-g 120 -keyint_min 120 -sc_threshold 0)
-            # - Strict Constant Bitrate (CBR) targeting 3000k (-b:v 3000k -minrate 3000k -maxrate 3000k -bufsize 3000k)
-            # - Broadcast audio: AAC-LC, 48000 Hz, 2 channels (stereo), 160 kbps
-            # - MP4 container flags: +faststart for instant playback and looping
-            ffmpeg -y -hide_banner -loglevel warning -i "${target}.tmp" \
-                "${audio_args[@]}" \
-                -c:v libx264 -preset veryfast -profile:v high -level:v 4.1 -pix_fmt yuv420p \
-                -r 60 -g 120 -keyint_min 120 -sc_threshold 0 \
-                -b:v 3000k -minrate 3000k -maxrate 3000k -bufsize 3000k \
-                -c:a aac -ar 48000 -ac 2 -b:a 160k \
-                "${map_args[@]}" \
-                -movflags +faststart \
-                -progress pipe:1 "$target" 2>/dev/null | while read -r line; do
-                if [[ "$line" == out_time_us=* ]]; then
-                    local us="${line#*=}"
-                    if [[ "$us" =~ ^[0-9]+$ ]] && [ -n "$duration" ]; then
-                        local pct
-                        pct=$(awk -v us="$us" -v dur="$duration" 'BEGIN { if (dur>0) { p=(us/1000000/dur)*100; if (p>100) p=100; printf "%.1f", p } else { print "0.0" } }')
-                        local filled
-                        filled=$(awk -v pct="$pct" 'BEGIN { printf "%d", (pct * 30 / 100) }')
-                        local unfilled=$((30 - filled))
-                        local bar=""
-                        for ((i=0; i<filled; i++)); do bar="${bar}="; done
-                        if [ $unfilled -gt 0 ]; then
-                            bar="${bar}>"
-                            for ((i=1; i<unfilled; i++)); do bar="${bar} "; done
-                        fi
-                        printf "\rFormatting NOALBS MP4: [%s] %s%%" "$bar" "$pct"
-                    fi
-                fi
-            done
-            echo ""
-
-            if [ -f "$target" ] && [ -s "$target" ]; then
-                local v_info=""
-                local a_info=""
-                if command -v ffprobe &> /dev/null; then
-                    v_info=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,r_frame_rate -of csv=s=' ':p=0 "$target" 2>/dev/null || true)
-                    a_info=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of csv=s=' ':p=0 "$target" 2>/dev/null || true)
-                fi
-                echo -e "${GREEN}✓ Verified Video: ${v_info:-h264 1920x1080 60fps}${NC}"
-                echo -e "${GREEN}✓ Verified Audio: ${a_info:-aac 48000Hz 2ch}${NC}"
-                echo -e "${GREEN}NOALBS Scene Switcher MP4 successfully formatted and ready for 100% seamless broadcast looping.${NC}"
-                rm -f "${target}.tmp"
-            else
-                echo -e "${YELLOW}FFmpeg transcode notice. Using original file as fallback.${NC}"
-                mv "${target}.tmp" "$target"
-            fi
-        else
-            echo -e "${YELLOW}FFmpeg not found on host. Saving source file for container internal formatting.${NC}"
-            mv "${target}.tmp" "$target"
-        fi
-    else
-        echo -e "${RED}Video download or retrieval failed from: $source_input${NC}"
-        rm -f "${target}.tmp"
-        if command -v ffmpeg &> /dev/null; then
-            echo -e "${YELLOW}Synthesizing broadcast-standard standby MP4 video (H.264 / AAC 48kHz Stereo) so server always has fallback protection ready...${NC}"
-            ffmpeg -y -hide_banner -loglevel error \
-                -f lavfi -i "color=c=0x0f172a:s=1920x1080:r=60" \
-                -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
-                -t 5 \
-                -c:v libx264 -preset ultrafast -profile:v high -level:v 4.1 -pix_fmt yuv420p \
-                -r 60 -g 120 -keyint_min 120 -sc_threshold 0 \
-                -b:v 3000k -minrate 3000k -maxrate 3000k -bufsize 3000k \
-                -c:a aac -ar 48000 -ac 2 -b:a 160k \
-                -map 0:v:0 -map 1:a:0 \
-                -movflags +faststart "$target" 2>/dev/null || true
-            if [ -f "$target" ] && [ -s "$target" ]; then
-                echo -e "${GREEN}Standby MP4 fallback video generated successfully at $target.${NC}"
-                return 0
-            fi
-        fi
-        return 1
-    fi
-}
-
-configure_noalbs() {
+configure_protection() {
     while true; do
         clear
-        echo -e "${GREEN}=== NOALBS Scene Switcher Configuration ===${NC}"
-        echo -e "Status: $([ "$NOALBS_ENABLED" == "true" ] && echo -e "${GREEN}ENABLED${NC}" || echo -e "${RED}DISABLED${NC}")"
+        echo -e "${GREEN}=== Disconnection Protection ===${NC}"
+        echo -e "When your stream disconnects or drops below the low bitrate, the server keeps your"
+        echo -e "platforms live by looping your backup MP4. If you are not back within the set time,"
+        echo -e "the backup video stops and the broadcast to all platforms ends."
         echo ""
-        echo "1) Toggle Enabled (Currently: $NOALBS_ENABLED)"
-        echo "2) Primary Fallback Mode (Current: ${FALLBACK_MODE:-video} [video = MP4, obs = OBS Scene Switch])"
-        echo "3) OBS WebSocket Host (Current: $OBS_WS_HOST)"
-        echo "4) OBS WebSocket Port (Current: $OBS_WS_PORT)"
-        echo "5) OBS WebSocket Password (Current: ${OBS_WS_PASSWORD:-(None)})"
-        echo "6) Main/Live Scene Name (Current: $OBS_SCENE_LIVE)"
-        echo "7) BRB Scene Name (Current: $OBS_SCENE_BRB)"
-        echo "8) Low Bitrate Threshold (Current: $LOW_BITRATE kbps)"
-        echo "9) Restore Bitrate Threshold (Current: $RESTORE_BITRATE kbps)"
-        echo "10) Configure NOALBS Scene Switcher mp4 (Current: ${BRB_VIDEO_URL:-Default (https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4)})"
-        echo "11) Disconnection Protection Duration (Current: ${CLOUD_BRB_TIMEOUT} seconds)"
-        echo "12) Back to Main Menu"
-        echo -e "Select an option: \c"
-        read -r noalbs_opt
+        echo -e "Status: $([ "$NOALBS_ENABLED" == "true" ] && echo -e "${GREEN}ENABLED${NC}" || echo -e "${RED}DISABLED${NC}")"
+        echo "1) Turn protection on/off"
+        echo "2) Backup video MP4 URL (Current: ${BRB_VIDEO_URL:-Default ($DEFAULT_BRB_VIDEO_URL)})"
+        echo "3) Low bitrate threshold (Current: $LOW_BITRATE kbps)"
+        echo "4) Restore bitrate threshold (Current: $RESTORE_BITRATE kbps)"
+        echo "5) Backup video duration before ending the broadcast (Current: $CLOUD_BRB_TIMEOUT seconds)"
+        echo "6) Back to Main Menu"
+        echo -e "${YELLOW}Changes apply after 'Build & Start Server'.${NC}"
+        echo -e "Selection: \c"
+        read -r prot_opt
 
-        case $noalbs_opt in
+        case $prot_opt in
             1)
                 if [ "$NOALBS_ENABLED" == "true" ]; then NOALBS_ENABLED="false"; else NOALBS_ENABLED="true"; fi
                 save_config
-                ;;
-            2)
-                if [ "$FALLBACK_MODE" == "obs" ]; then
-                    FALLBACK_MODE="video"
-                else
-                    FALLBACK_MODE="obs"
-                fi
-                echo -e "${GREEN}Primary Fallback Mode switched to: $FALLBACK_MODE${NC}"
-                save_config
+                echo -e "${GREEN}Disconnection protection is now $([ "$NOALBS_ENABLED" == "true" ] && echo ON || echo OFF).${NC}"
                 sleep 1
                 ;;
-            3)
-                echo -e "Enter OBS WebSocket Host (e.g. 192.168.1.50 or host.docker.internal):"
+            2)
+                echo -e "Enter a direct link to an .mp4 file (Enter keeps current, 'default' resets):"
                 read -r input
-                if [ ! -z "$input" ]; then OBS_WS_HOST="$input"; save_config; fi
+                if [ "$input" == "default" ]; then
+                    BRB_VIDEO_URL=""
+                    save_config
+                elif [ -n "$input" ]; then
+                    if [[ "$input" =~ ^https?://[^[:space:]\"\'\`\$]+$ ]]; then
+                        if curl -sfL -r 0-1023 -o /dev/null --max-time 20 "$input"; then
+                            BRB_VIDEO_URL="$input"
+                            save_config
+                            echo -e "${GREEN}Backup video set. It is downloaded and formatted when the server starts.${NC}"
+                        else
+                            echo -e "${RED}That link could not be reached. Keeping the current video.${NC}"
+                        fi
+                    else
+                        echo -e "${RED}Please enter a link starting with http:// or https://${NC}"
+                    fi
+                fi
+                sleep 2
+                ;;
+            3)
+                echo -e "Switch to the backup video when your bitrate falls below (kbps):"
+                read -r input
+                if [[ "$input" =~ ^[0-9]+$ ]] && [ "$input" -ge 1 ]; then
+                    LOW_BITRATE="$input"
+                    if [ "$RESTORE_BITRATE" -lt "$LOW_BITRATE" ]; then RESTORE_BITRATE="$LOW_BITRATE"; fi
+                    save_config
+                elif [ -n "$input" ]; then
+                    echo -e "${RED}Please enter a whole number.${NC}"; sleep 1
+                fi
                 ;;
             4)
-                echo -e "Enter OBS WebSocket Port (Default: 4455):"
+                echo -e "Switch back to live once your bitrate is at least (kbps, must be >= $LOW_BITRATE):"
                 read -r input
-                if [ ! -z "$input" ]; then OBS_WS_PORT="$input"; save_config; fi
+                if [[ "$input" =~ ^[0-9]+$ ]] && [ "$input" -ge "$LOW_BITRATE" ]; then
+                    RESTORE_BITRATE="$input"
+                    save_config
+                elif [ -n "$input" ]; then
+                    echo -e "${RED}Please enter a whole number of at least $LOW_BITRATE.${NC}"; sleep 1
+                fi
                 ;;
             5)
-                echo -e "Enter OBS WebSocket Password:"
+                echo -e "How many seconds should the backup video play before the broadcast ends? (minimum 5)"
                 read -r input
-                OBS_WS_PASSWORD="$input"
-                save_config
-                ;;
-            6)
-                echo -e "Enter OBS Main Scene Name (e.g. 'Main' or 'Streaming'):"
-                read -r input
-                if [ ! -z "$input" ]; then OBS_SCENE_LIVE="$input"; save_config; fi
-                ;;
-            7)
-                echo -e "Enter OBS BRB Scene Name (e.g. 'BRB' or 'LowBitrate'):"
-                read -r input
-                if [ ! -z "$input" ]; then OBS_SCENE_BRB="$input"; save_config; fi
-                ;;
-            8)
-                echo -e "Enter Low Bitrate Threshold in kbps (e.g. 1000):"
-                read -r input
-                if [ ! -z "$input" ]; then LOW_BITRATE="$input"; save_config; fi
-                ;;
-            9)
-                echo -e "Enter Restore Bitrate Threshold in kbps (e.g. 1500):"
-                read -r input
-                if [ ! -z "$input" ]; then RESTORE_BITRATE="$input"; save_config; fi
-                ;;
-            10)
-                echo -e "Enter NOALBS Scene Switcher MP4 URL (Press Enter for default: https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4, or 'clear' to reset):"
-                read -r input
-                if [ "$input" == "disable" ] || [ "$input" == "clear" ] || [ "$input" == "DISABLE" ] || [ "$input" == "CLEAR" ]; then
-                    BRB_VIDEO_URL=""
-                    rm -f ./data/brb_video.mp4
-                    save_config
-                    echo -e "${GREEN}Cleared custom BRB Video URL. Default fallback will be used if needed.${NC}"
-                    sleep 1
-                elif [ ! -z "$input" ]; then
-                    BRB_VIDEO_URL="$input"
-                    CLOUD_BRB="true"
-                    FALLBACK_MODE="video"
-                    save_config
-                    ensure_brb_video_transcoded "$BRB_VIDEO_URL"
-                    echo -e "${GREEN}NOALBS Scene Switcher mp4 configured and verified.${NC}"
-                    echo -e "${YELLOW}Will play on loop during low bitrate (<${LOW_BITRATE} kbps) or disconnect for ${CLOUD_BRB_TIMEOUT} seconds.${NC}"
-                    sleep 2
-                else
-                    if [ -z "$BRB_VIDEO_URL" ]; then
-                        BRB_VIDEO_URL="https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
-                    fi
-                    CLOUD_BRB="true"
-                    FALLBACK_MODE="video"
-                    save_config
-                    ensure_brb_video_transcoded "$BRB_VIDEO_URL"
-                    echo -e "${GREEN}Default NOALBS Scene Switcher mp4 downloaded and verified.${NC}"
-                    echo -e "${YELLOW}Will play on loop during low bitrate (<${LOW_BITRATE} kbps) or disconnect for ${CLOUD_BRB_TIMEOUT} seconds.${NC}"
-                    sleep 2
-                fi
-                ;;
-            11)
-                echo -e "Enter Disconnection Protection Duration in seconds (Current: $CLOUD_BRB_TIMEOUT):"
-                read -r input
-                if [ ! -z "$input" ]; then
+                if [[ "$input" =~ ^[0-9]+$ ]] && [ "$input" -ge 5 ]; then
                     CLOUD_BRB_TIMEOUT="$input"
                     save_config
-                    echo -e "${GREEN}Disconnection protection duration updated to $CLOUD_BRB_TIMEOUT seconds.${NC}"
-                    sleep 1
+                elif [ -n "$input" ]; then
+                    echo -e "${RED}Please enter a whole number of at least 5.${NC}"; sleep 1
                 fi
                 ;;
-            12|13) break ;;
+            6) break ;;
             *) echo -e "${RED}Invalid option${NC}" ; sleep 1 ;;
         esac
     done
@@ -1428,14 +1291,16 @@ build_and_run() {
         docker volume rm -f $OLD_VOLUMES 2>/dev/null || true
     fi
 
+    require_stream_key
+    if [ "$DOMAIN_PROMPTED" != "true" ]; then
+        configure_domain
+    fi
+
     enable_bbr_and_tcp_optimizations
 
     echo -e "${YELLOW}Checking for port conflicts...${NC}"
     CONFLICTS=0
-    declare -a PORTS_TO_CHECK=("$PORT_RTMP")
-    if [ ! -z "$SERVER_DOMAIN" ]; then
-        PORTS_TO_CHECK+=("$PORT_HTTP")
-    fi
+    declare -a PORTS_TO_CHECK=("$PORT_RTMP" "$PORT_HTTP" "$PORT_HTTPS")
 
     for port in "${PORTS_TO_CHECK[@]}"; do
         if check_port "$port"; then
@@ -1508,17 +1373,7 @@ build_and_run() {
         return
     fi
 
-    mkdir -p ./data
-    if [ -f "./data/brb_video.mp4" ] && [ -s "./data/brb_video.mp4" ]; then
-        echo -e "${GREEN}Existing BRB video found at ./data/brb_video.mp4. Preserving video source.${NC}"
-    else
-        if [ -z "$BRB_VIDEO_URL" ]; then
-            echo -e "${YELLOW}BRB Video URL is empty and no cached video exists. Setting to default...${NC}"
-            BRB_VIDEO_URL="https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
-            save_config
-        fi
-        ensure_brb_video_transcoded "$BRB_VIDEO_URL"
-    fi
+    mkdir -p ./data/letsencrypt
 
     echo -e "${GREEN}Building Web Dashboard static assets...${NC}"
     if command -v npm &> /dev/null; then
@@ -1536,8 +1391,8 @@ build_and_run() {
 
     echo -e "${GREEN}Starting container...${NC}"
 
-    # Always publish RTMP port, HTTP web server port, and HTTPS alternative port (for Cloudflare / SSL)
-    PORT_MAPS="-p ${PORT_RTMP}:1935 -p ${PORT_HTTP}:80 -p ${PORT_HTTPS:-8443}:8443"
+    # RTMP ingest, website over HTTP, and website over HTTPS (Cloudflare 'Full' SSL connects to 443)
+    PORT_MAPS="-p ${PORT_RTMP}:1935 -p ${PORT_HTTP}:80 -p ${PORT_HTTPS}:8443"
 
     # Start the container
     docker run -d --name cookie-rtmps \
@@ -1597,39 +1452,24 @@ build_and_run() {
         -e TWITCH_BROADCASTER_ID="$TWITCH_BROADCASTER_ID" \
         -e SERVER_DOMAIN="$SERVER_DOMAIN" \
         -e NOALBS_ENABLED="$NOALBS_ENABLED" \
-        -e FALLBACK_MODE="$FALLBACK_MODE" \
-        -e OBS_WS_HOST="$OBS_WS_HOST" \
-        -e OBS_WS_PORT="$OBS_WS_PORT" \
-        -e OBS_WS_PASSWORD="$OBS_WS_PASSWORD" \
-        -e OBS_SCENE_LIVE="$OBS_SCENE_LIVE" \
-        -e OBS_SCENE_BRB="$OBS_SCENE_BRB" \
         -e LOW_BITRATE="$LOW_BITRATE" \
         -e RESTORE_BITRATE="$RESTORE_BITRATE" \
-        -e CLOUD_BRB="$CLOUD_BRB" \
         -e CLOUD_BRB_TIMEOUT="$CLOUD_BRB_TIMEOUT" \
-        -e BRB_VIDEO_PATH="/app/data/brb_video.mp4" \
         -e BRB_VIDEO_URL="$BRB_VIDEO_URL" \
         -v "$(pwd)/data:/app/data" \
+        -v "$(pwd)/data/letsencrypt:/etc/letsencrypt" \
         cookie-rtmps
 
     if [ $? -eq 0 ]; then
-        SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
-        DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
-        if [ "$PORT_HTTP" != "80" ] && [ -z "$SERVER_DOMAIN" ]; then
-            CHAT_CONFIG_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/${CHAT_HEX_KEY}"
-            DASHBOARD_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/"
-            STATS_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/stat"
-            OBS_OVERLAY_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/chat.html?key=${CHAT_HEX_KEY}&mode=unified"
-        else
-            CHAT_CONFIG_URL="http://${DISPLAY_HOST}/${CHAT_HEX_KEY}"
-            DASHBOARD_URL="http://${DISPLAY_HOST}/"
-            STATS_URL="http://${DISPLAY_HOST}/stat"
-            OBS_OVERLAY_URL="http://${DISPLAY_HOST}/chat.html?key=${CHAT_HEX_KEY}&mode=unified"
-        fi
+        build_site_urls
         echo -e "${GREEN}Container 'cookie-rtmps' is running!${NC}"
-        echo -e "You can stream to: rtmp://${DISPLAY_HOST}:${PORT_RTMP}/${APP_NAME}"
-        echo -e "Vertical stream:  rtmp://${DISPLAY_HOST}:${PORT_RTMP}/vertical"
-        echo -e "Stats available at: ${STATS_URL}"
+        echo -e "You can stream to: rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}"
+        echo -e "Vertical stream:  rtmp://${SERVER_IP}:${PORT_RTMP}/vertical"
+        echo -e "Settings website: ${DASHBOARD_URL}  (password: your stream key)"
+        if [ "$NOALBS_ENABLED" == "true" ]; then
+            echo -e "${YELLOW}Disconnection protection is ON. On first start the backup video is downloaded and formatted;${NC}"
+            echo -e "${YELLOW}streams go out to platforms once that finishes (usually under a few minutes).${NC}"
+        fi
         echo -e "${YELLOW}Combined Chat Links:${NC}"
         echo -e "  Combined Chat Config Page: ${CHAT_CONFIG_URL}"
         echo -e "  OBS Overlay (Unified):     ${OBS_OVERLAY_URL}"
@@ -1675,7 +1515,7 @@ view_logs() {
                 fflush()
                 next
             }
-            /NOALBS|Cloud BRB/ {
+            /\[Protection\]/ {
                 print "\033[0;36m" $0 "\033[0m"
                 fflush()
                 next
@@ -1728,7 +1568,7 @@ deep_cleanup_ports_and_processes() {
     local PORTS=()
     for p in "${CANDIDATE_PORTS[@]}"; do
         # Do not include port 80 under any circumstances
-        if [ "$p" != "80" ] && [ -n "$p" ]; then
+        if [ "$p" != "80" ] && [ "$p" != "443" ] && [ -n "$p" ]; then
             PORTS+=("$p")
         fi
     done
@@ -1768,7 +1608,8 @@ deep_cleanup_ports_and_processes() {
 
     # Terminate leftover host helper processes if any were spawned outside container
     $SUDO pkill -f "tiktok_pusher" 2>/dev/null || true
-    $SUDO pkill -f "noalbs" 2>/dev/null || true
+    $SUDO pkill -f "stream_protection" 2>/dev/null || true
+    $SUDO pkill -x "mediamtx" 2>/dev/null || true
     $SUDO pkill -f "stream_validator" 2>/dev/null || true
     $SUDO pkill -f "gunicorn" 2>/dev/null || true
     $SUDO pkill -f "stunnel" 2>/dev/null || true
@@ -1835,38 +1676,43 @@ stop_and_uninstall() {
 }
 
 # Cache Server IP for UI Performance
-SERVER_IP=$(curl -4 -s ifconfig.me || echo "<your_server_ip>")
+SERVER_IP=$(curl -4 -s --max-time 5 ifconfig.me || hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=${SERVER_IP:-"<your_server_ip>"}
+
+build_site_urls() {
+    local base
+    if [ -n "$SERVER_DOMAIN" ]; then
+        base="https://${SERVER_DOMAIN}"
+    elif [ "$PORT_HTTP" != "80" ]; then
+        base="http://${SERVER_IP}:${PORT_HTTP}"
+    else
+        base="http://${SERVER_IP}"
+    fi
+    DASHBOARD_URL="${base}/"
+    CHAT_CONFIG_URL="${base}/${CHAT_HEX_KEY}"
+    OBS_OVERLAY_URL="${base}/chat.html?key=${CHAT_HEX_KEY}&mode=unified"
+}
 
 while true; do
     clear
-    DISPLAY_HOST=${SERVER_DOMAIN:-$SERVER_IP}
-    if [ "$PORT_HTTP" != "80" ] && [ -z "$SERVER_DOMAIN" ]; then
-        CHAT_CONFIG_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/${CHAT_HEX_KEY}"
-        DASHBOARD_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/"
-        STATS_URL="http://${DISPLAY_HOST}:${PORT_HTTP}/stat"
-    else
-        CHAT_CONFIG_URL="http://${DISPLAY_HOST}/${CHAT_HEX_KEY}"
-        DASHBOARD_URL="http://${DISPLAY_HOST}/"
-        STATS_URL="http://${DISPLAY_HOST}/stat"
-    fi
+    build_site_urls
     echo -e "${GREEN}=====================================${NC}"
     echo -e "${GREEN}     CookieRTMPS Quick Installer      ${NC}"
     echo -e "${GREEN}=====================================${NC}"
     echo -e "${YELLOW}Quick Reference:${NC}"
-    echo -e "  RTMP Ingest:     rtmp://${DISPLAY_HOST}:${PORT_RTMP}/${APP_NAME}"
-    echo -e "  Vertical Ingest: rtmp://${DISPLAY_HOST}:${PORT_RTMP}/vertical"
-    echo -e "  Stats URL:       ${STATS_URL}"
+    echo -e "  RTMP Ingest:     rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}"
+    echo -e "  Vertical Ingest: rtmp://${SERVER_IP}:${PORT_RTMP}/vertical"
     echo -e "  Combined Chat Config Page: ${CHAT_CONFIG_URL}"
-    echo -e "  Web Dashboard:   ${DASHBOARD_URL}"
+    echo -e "  Web Dashboard:   ${DASHBOARD_URL}  (password: stream key)"
     echo "-------------------------------------"
     echo "1) Install Docker (if not installed)"
     echo "2) Configure Stream Keys (Horizontal)"
     echo "3) Configure Stream Keys (Vertical)"
     echo "4) Configure OBS Setup & Security Key"
     echo "5) Configure IP Whitelist (Optional)"
-    echo "6) Configure Domain / Reverse Proxy (Optional)"
+    echo "6) Configure Website Address / Cloudflare Reverse Proxy"
     echo "7) Configure Optimizations (Chunk Size)"
-    echo "8) Configure NOALBS Scene Switcher"
+    echo "8) Configure Disconnection Protection (Backup Video)"
     echo "9) Build & Start Server"
     echo "10) Run Integration Tests"
     echo "11) Stop Server & Uninstall"
@@ -1883,7 +1729,7 @@ while true; do
         5) configure_whitelist ;;
         6) configure_domain ;;
         7) configure_optimizations ;;
-        8) configure_noalbs ;;
+        8) configure_protection ;;
         9) build_and_run ;;
         10) if [ -f "./integration_test.sh" ]; then chmod +x ./integration_test.sh; ./integration_test.sh; else echo -e "${RED}Test script not found.${NC}"; fi; echo -e "Press Enter to continue..."; read -r ;;
         11) stop_and_uninstall ;;

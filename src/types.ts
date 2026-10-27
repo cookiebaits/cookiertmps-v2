@@ -1,4 +1,4 @@
-export type TabType = 'chat' | 'destinations' | 'titles' | 'security' | 'noalbs' | 'stats' | 'installer';
+export type TabType = 'chat' | 'destinations' | 'titles' | 'security' | 'protection' | 'stats' | 'installer';
 
 export interface DestinationKey {
   id: string;

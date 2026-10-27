@@ -164,7 +164,7 @@ if [ -n "$SERVER_DOMAIN" ]; then
     if [ ! -f "${CERT_DIR}/fullchain.pem" ]; then
         echo "SSL certificate not found for ${SERVER_DOMAIN}. Generating dummy certificate..."
         mkdir -p "${CERT_DIR}"
-        openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
             -keyout "${CERT_DIR}/privkey.pem" \
             -out "${CERT_DIR}/fullchain.pem" \
             -subj "/CN=${SERVER_DOMAIN}"
@@ -210,13 +210,11 @@ if [ -n "$SERVER_DOMAIN" ] && [ "$SERVER_DOMAIN" != "localhost" ]; then
     ) &
 fi
 
-# --- Start NOALBS & Cloud Failover Protection ---
-if [ "$(echo "${NOALBS_ENABLED:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ] || [ "$(echo "${CLOUD_BRB:-true}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-    echo "Verifying NOALBS / Cloud BRB fallback video readiness..."
-    python3 -c "from noalbs.noalbs import Noalbs; Noalbs().ensure_brb_video_ready()" 2>&1 | tee -a /tmp/noalbs.log || true
-    echo "Starting NOALBS / Cloud BRB Disconnection Protection process..."
-    python3 /app/noalbs/noalbs.py 2>&1 | tee -a /tmp/noalbs.log &
-fi
+# --- Disconnection Protection (MediaMTX backup-video failover) ---
+# Always started: it forwards the ingest stream to the platform outputs,
+# and only plays the backup video when NOALBS_ENABLED=true.
+echo "Starting Disconnection Protection..."
+python3 -u /app/stream_protection.py 2>&1 | tee -a /tmp/stream_protection.log &
 
 echo "Starting Nginx..."
 exec "$@" # Execute the CMD from Dockerfile (nginx -g 'daemon off;')

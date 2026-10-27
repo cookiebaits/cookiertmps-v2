@@ -1,6 +1,6 @@
 import React from 'react';
 import { TabType } from '../types';
-import { MessageSquare, Key, Type, ShieldCheck, Cpu, Activity, Terminal } from 'lucide-react';
+import { MessageSquare, Key, Type, ShieldCheck, LifeBuoy, Activity, Terminal } from 'lucide-react';
 
 interface NavigationProps {
   activeTab: TabType;
@@ -13,7 +13,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, setActiveTab 
     { id: 'destinations' as TabType, label: 'Destinations & Keys', icon: Key },
     { id: 'titles' as TabType, label: 'Auto-Titles & Ep.#', icon: Type },
     { id: 'security' as TabType, label: 'IP Whitelist & Security', icon: ShieldCheck },
-    { id: 'noalbs' as TabType, label: 'NOALBS & Cloud BRB', icon: Cpu },
+    { id: 'protection' as TabType, label: 'Disconnection Protection', icon: LifeBuoy },
     { id: 'stats' as TabType, label: 'RTMP Stats & Relay', icon: Activity },
     { id: 'installer' as TabType, label: 'VPS Deploy & Stunnel', icon: Terminal },
   ];

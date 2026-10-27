@@ -52,28 +52,39 @@ else
     echo -e "[${RED}FAILED${NC}]"
 fi
 
-# 4. Check NOALBS if enabled
-NOALBS_ENABLED=$(docker exec $CONTAINER_NAME printenv NOALBS_ENABLED 2>/dev/null || echo "false")
-if [ "$NOALBS_ENABLED" == "true" ]; then
-    echo -n "Checking NOALBS process... "
-    if docker exec $CONTAINER_NAME pgrep -f "noalbs.py" > /dev/null; then
-        echo -e "[${GREEN}PASSED${NC}]"
-    else
-        echo -e "[${RED}FAILED${NC}]"
-    fi
-else
-    echo -e "NOALBS is ${YELLOW}DISABLED${NC}, skipping check."
-fi
-
-# 5. Run NOALBS Unit Tests
-echo -n "Running NOALBS component tests... "
-if docker exec $CONTAINER_NAME python3 /app/test_noalbs.py > /tmp/noalbs_test.log 2>&1; then
-    echo -e "[${GREEN}PASSED${NC}]"
-elif python3 test_noalbs.py > /tmp/noalbs_test.log 2>&1; then
+# 4. Disconnection Protection
+echo -n "Checking Disconnection Protection controller... "
+if docker exec $CONTAINER_NAME pgrep -f "stream_protection.py" > /dev/null; then
     echo -e "[${GREEN}PASSED${NC}]"
 else
     echo -e "[${RED}FAILED${NC}]"
-    cat /tmp/noalbs_test.log 2>/dev/null || true
+fi
+
+NOALBS_ENABLED=$(docker exec $CONTAINER_NAME printenv NOALBS_ENABLED 2>/dev/null || echo "false")
+if [ "$NOALBS_ENABLED" == "true" ]; then
+    echo -n "Checking backup video server (MediaMTX, may need a few minutes on first start)... "
+    for i in $(seq 1 60); do
+        if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1:9997/v3/paths/list > /dev/null 2>&1; then
+            READY=1; break
+        fi
+        sleep 5
+    done
+    if [ "$READY" == "1" ]; then
+        echo -e "[${GREEN}PASSED${NC}]"
+    else
+        echo -e "[${RED}FAILED${NC}]"
+        docker exec $CONTAINER_NAME tail -20 /tmp/stream_protection.log 2>/dev/null || true
+    fi
+else
+    echo -e "Disconnection protection is ${YELLOW}DISABLED${NC}, skipping backup video check."
+fi
+
+# 5. Settings website
+echo -n "Checking settings website on port 80... "
+if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1/ > /dev/null; then
+    echo -e "[${GREEN}PASSED${NC}]"
+else
+    echo -e "[${RED}FAILED${NC}]"
 fi
 
 # 6. Check Host Ports

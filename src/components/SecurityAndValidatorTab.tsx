@@ -37,10 +37,10 @@ export const SecurityAndValidatorTab: React.FC = () => {
       id: '3',
       timestamp: new Date(Date.now() - 120000).toLocaleTimeString(),
       clientIp: '127.0.0.1',
-      streamKey: 'cloud_brb_stream_fallback',
-      appName: 'live',
+      streamKey: 'vertical_stream_key',
+      appName: 'vertical',
       status: 'ACCEPTED',
-      message: 'ACCEPTED cloud_brb stream from 127.0.0.1',
+      message: 'ACCEPTED vertical stream from 127.0.0.1',
     },
   ]);
 
@@ -134,7 +134,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
                 type="text"
                 value={testKey}
                 onChange={(e) => setTestKey(e.target.value)}
-                placeholder="e.g. yt_live_key_sample123 or cloud_brb_test"
+                placeholder="e.g. yt_live_key_sample123 or my_stream_key"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -231,7 +231,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
                 Security Architecture Highlights
               </span>
               <ul className="text-[11px] text-slate-400 space-y-1 list-disc list-inside">
-                <li><code className="text-emerald-400">cloud_brb</code> fallback stream keys always bypass IP limits for local scene recovery.</li>
+                <li>Platform outputs only accept video from the server itself, so the backup video can never be hijacked from outside.</li>
                 <li>Cloudflare proxy IP headers are unwrapped using Nginx <code className="text-amber-300 font-mono">set_real_ip_from</code> rules.</li>
                 <li>Rejected publish attempts return <code className="text-rose-400">HTTP 403 Forbidden</code> directly to Nginx RTMP module.</li>
               </ul>
