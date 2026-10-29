@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CookieRTMPS Unified Chat Overlay for OBS</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: transparent;
+            color: #f8fafc;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ----------------------------------------------------
+           MODE 1: UNIFIED SINGLE STREAM FEED (FOR OBS STUDIO)
+           Combines Twitch + Kick + YouTube in 1 transparent window
+        ---------------------------------------------------- */
+        #unified-wrapper {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background: transparent;
+        }
+
+        /* Floating unobtrusive controls (fades on hover, transparent in OBS) */
+        .preview-controls {
+            position: absolute;
+            top: 10px;
+            right: 12px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            opacity: 0.25;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .preview-controls:hover {
+            opacity: 1;
+        }
+        .control-pill {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #f8fafc;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            text-decoration: none;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        .control-pill:hover {
+            background: #f59e0b;
+            color: #0f172a;
+            border-color: #f59e0b;
+        }
+
+        #unified-feed {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            width: 100%;
+            height: 100%;
+            padding: 14px;
+            overflow-y: auto;
+            gap: 8px;
+            background: transparent;
+        }
+        #unified-feed::-webkit-scrollbar {
+            display: none;
+        }
+
+        .chat-line {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 9px;
+            padding: 7px 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+            animation: slideUpFade 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            max-width: 96%;
+            width: fit-content;
+            word-break: break-word;
+            font-size: 13.5px;
+            backdrop-filter: blur(10px);
+            line-height: 1.35;
+        }
+
+        @keyframes slideUpFade {
+            from { opacity: 0; transform: translateY(10px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        /* Platform Badge with Vector Logo and Label telling which platform they are from */
+        .platform-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2.5px 7px;
+            border-radius: 5px;
+            font-size: 10.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
+            line-height: 1;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+            vertical-align: middle;
+        }
+        .platform-badge.platform-twitch {
+            background: #9146FF;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .platform-badge.platform-youtube {
+            background: #FF0000;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .platform-badge.platform-kick {
+            background: #53FC18;
+            color: #000000;
+            border: 1px solid rgba(0, 0, 0, 0.25);
+        }
+        .platform-badge.platform-system {
+            background: #334155;
+            color: #fcd34d;
+            border: 1px dashed rgba(252, 211, 77, 0.4);
+        }
+
+        .platform-icon {
+            width: 13px;
+            height: 13px;
+            flex-shrink: 0;
+            fill: currentColor;
+        }
+
+        .platform-label {
+            font-weight: 800;
+            font-size: 10px;
+        }
+
+        .stream-author {
+            font-weight: 700;
+            font-size: 13.5px;
+            white-space: nowrap;
+            margin-left: 1px;
+        }
+
+        .stream-text {
+            color: #f8fafc;
+            font-weight: 400;
+            font-size: 13.5px;
+            line-height: 1.4;
+        }
+
+        .system-pill {
+            background: rgba(30, 41, 59, 0.88);
+            border: 1px dashed rgba(245, 158, 11, 0.45);
+            font-size: 12px;
+            color: #fcd34d;
+        }
+
+        /* ----------------------------------------------------
+           MODE 2: MULTI-COLUMN SIDE-BY-SIDE GRID
+        ---------------------------------------------------- */
+        #chat-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            background: #030712;
+        }
+        .chat-column {
+            flex: 1;
+            height: 100%;
+            position: relative;
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            background: #0b0f19;
+            min-width: 0;
+        }
+        .chat-column:last-child {
+            border-right: none;
+        }
+        iframe {
+            border: none;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            flex: 1;
+        }
+        .column-header {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 20;
+            background: rgba(11, 15, 25, 0.92);
+            backdrop-filter: blur(8px);
+            padding: 4px 10px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+        }
+        .header-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+        .header-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.95);
+            text-transform: uppercase;
+        }
+        .popout-btn {
+            color: #f59e0b;
+            text-decoration: none;
+            font-size: 10px;
+            font-weight: bold;
+            background: rgba(245, 158, 11, 0.2);
+            padding: 2px 6px;
+            border-radius: 8px;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            margin-left: 4px;
+        }
+
+        /* YouTube Live Watcher Card */
+        .yt-watcher-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 20px;
+            text-align: center;
+            background: #090d16;
+        }
+        .yt-box {
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            padding: 24px 20px;
+            max-width: 330px;
+            width: 100%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .radar-spinner {
+            width: 44px;
+            height: 44px;
+            margin: 0 auto 12px;
+            border: 3px solid rgba(239, 68, 68, 0.2);
+            border-top: 3px solid #ef4444;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .yt-input {
+            width: 100%;
+            background: #020617;
+            border: 1px solid #334155;
+            color: #f8fafc;
+            padding: 8px 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+        .yt-btn {
+            width: 100%;
+            background: #ef4444;
+            color: #ffffff;
+            border: none;
+            padding: 8px;
+            border-radius: 8px;
+            margin-top: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Unified Feed Container for OBS -->
+    <div id="unified-wrapper" style="display: none;">
+        <div class="preview-controls">
+            <a href="/" class="control-pill" title="Open full CookieRTMPS Dashboard">Web Dashboard ↗</a>
+            <button id="btn-test-twitch" class="control-pill" title="Test Twitch logo & message">🟣 Test Twitch</button>
+            <button id="btn-test-yt" class="control-pill" title="Test YouTube logo & message">🔴 Test YouTube</button>
+            <button id="btn-test-kick" class="control-pill" title="Test Kick logo & message">🟢 Test Kick</button>
+        </div>
+        <div id="unified-feed"></div>
+    </div>
+
+    <!-- Multi-Column Container -->
+    <div id="chat-container"></div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+
+        // Check if params were hex-encoded via ?obs=
+        let rawHexQuery = urlParams.get('obs');
+        if (rawHexQuery) {
+            try {
+                const decodedStr = rawHexQuery.replace(/(..)/g, '%$1');
+                const decodedQuery = decodeURIComponent(decodedStr);
+                const subParams = new URLSearchParams(decodedQuery);
+                for (const [k, v] of subParams.entries()) {
+                    if (!urlParams.has(k)) urlParams.set(k, v);
+                }
+            } catch (e) {}
+        }
+
+        const mode = urlParams.get('mode') || 'columns';
+        const hexKey = urlParams.get('key') || '';
+        
+        // ONLY enable platforms if their parameter is present and non-empty in the OBS URL!
+        const twitchParam = urlParams.get('twitch') ? urlParams.get('twitch').trim() : '';
+        const youtubeParam = urlParams.get('youtube') ? urlParams.get('youtube').trim() : '';
+        const kickParam = urlParams.get('kick') ? urlParams.get('kick').trim() : '';
+        const isTestMode = urlParams.get('test') === '1' || urlParams.get('demo') === '1';
+
+        const currentHost = window.location.hostname || 'localhost';
+
+        function escapeHtml(str) {
+            if (typeof str !== 'string') return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function extractCleanHandle(input) {
+            if (!input) return '';
+            input = input.trim();
+            if (input.includes('youtube.com/') || input.includes('youtu.be/')) {
+                try {
+                    const u = new URL(input.startsWith('http') ? input : 'https://' + input);
+                    const v = u.searchParams.get('v');
+                    if (v && v.length === 11) return v.replace(/[^a-zA-Z0-9_-]/g, '');
+                    const parts = u.pathname.split('/').filter(Boolean);
+                    const handlePart = parts.find(p => p.startsWith('@'));
+                    if (handlePart) return handlePart.slice(1).replace(/[^a-zA-Z0-9_.-]/g, '');
+                    if (parts[0] && parts[0] !== 'live' && parts[0] !== 'watch') {
+                        const raw = parts[0] === 'c' || parts[0] === 'channel' || parts[0] === 'user' ? (parts[1] || parts[0]) : parts[0];
+                        return raw.replace(/[^a-zA-Z0-9_.-]/g, '');
+                    }
+                } catch(e) {}
+            }
+            return input.replace(/^@/, '').replace(/\/live\/?$/, '').replace(/[^a-zA-Z0-9_.-]/g, '');
+        }
+
+        function extractVideoId(input) {
+            if (!input) return '';
+            input = input.trim();
+            if (input.length === 11 && !input.startsWith('@') && !input.startsWith('UC') && !input.includes('/')) {
+                return input.replace(/[^a-zA-Z0-9_-]/g, '');
+            }
+            const m1 = input.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+            if (m1) return m1[1];
+            const m2 = input.match(/(?:youtu\.be\/|live\/|watch\/|embed\/)([a-zA-Z0-9_-]{11})/);
+            if (m2) return m2[1];
+            return '';
+        }
+
+        // Vector SVGs for Instant, Pixel-Perfect Platform Logos
+        const TWITCH_SVG = `<svg class="platform-icon" viewBox="0 0 24 24"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0h1.714v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>`;
+
+        const YOUTUBE_SVG = `<svg class="platform-icon" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
+
+        const KICK_SVG = `<svg class="platform-icon" viewBox="0 0 24 24"><path d="M3 2h5.5v7.5l5.5-7.5H21l-7.5 9.5L21 22h-6.8l-5.7-8v8H3V2z"/></svg>`;
+
+        const SYSTEM_SVG = `<svg class="platform-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>`;
+
+        // -----------------------------------------------------------
+        // MODE 1: UNIFIED ALL-IN-ONE FEED (OBS Browser Source)
+        // Displays ONLY the enabled platforms with platform logo & name
+        // -----------------------------------------------------------
+        if (mode === 'unified') {
+            document.getElementById('chat-container').style.display = 'none';
+            const wrapper = document.getElementById('unified-wrapper');
+            wrapper.style.display = 'flex';
+            const feed = document.getElementById('unified-feed');
+
+            const seenMessageIds = new Set();
+
+            // Pushes chat line with platform logo and badge telling which platform it came from
+            function pushMessage(platform, author, text, color, isSystem = false) {
+                const line = document.createElement('div');
+                line.className = 'chat-line' + (isSystem ? ' system-pill' : '');
+
+                // Platform Badge with SVG Logo and Label
+                const badge = document.createElement('span');
+                badge.className = `platform-badge platform-${platform}`;
+
+                let iconSvg = SYSTEM_SVG;
+                let label = 'System';
+                if (platform === 'twitch') {
+                    iconSvg = TWITCH_SVG;
+                    label = 'Twitch';
+                } else if (platform === 'youtube') {
+                    iconSvg = YOUTUBE_SVG;
+                    label = 'YouTube';
+                } else if (platform === 'kick') {
+                    iconSvg = KICK_SVG;
+                    label = 'Kick';
+                }
+
+                badge.innerHTML = `${iconSvg}<span class="platform-label">${label}</span>`;
+
+                const userSpan = document.createElement('span');
+                userSpan.className = 'stream-author';
+                userSpan.style.color = color;
+                userSpan.innerText = author + ':';
+
+                const textSpan = document.createElement('span');
+                textSpan.className = 'stream-text';
+                textSpan.innerText = ' ' + text;
+
+                line.appendChild(badge);
+                line.appendChild(userSpan);
+                line.appendChild(textSpan);
+
+                feed.appendChild(line);
+                feed.scrollTop = feed.scrollHeight;
+
+                // Keep memory light in long OBS sessions (max 80 messages)
+                if (feed.children.length > 80) {
+                    feed.removeChild(feed.firstChild);
+                }
+            }
+
+            // Interactive test buttons
+            document.getElementById('btn-test-twitch').onclick = () => {
+                pushMessage('twitch', 'TwitchViewer', 'Hello from Twitch! Chat working perfectly 🟣', '#a855f7');
+            };
+            document.getElementById('btn-test-yt').onclick = () => {
+                pushMessage('youtube', 'YouTubeStreamer', 'YouTube Live chat connected with official badge! 🔴', '#ef4444');
+            };
+            document.getElementById('btn-test-kick').onclick = () => {
+                pushMessage('kick', 'KickChatter', 'Kick chat active and looking crisp! 🟢', '#22c55e');
+            };
+
+            // Banner announcing ONLY the enabled platforms
+            const activePlatformNames = [
+                twitchParam ? '🟣 Twitch' : null,
+                youtubeParam ? '🔴 YouTube' : null,
+                kickParam ? '🟢 Kick' : null
+            ].filter(Boolean);
+
+            if (activePlatformNames.length > 0) {
+                pushMessage('system', 'CookieRTMPS', `Unified OBS Overlay Active (${activePlatformNames.join(' • ')})`, '#f59e0b', true);
+            } else {
+                pushMessage('system', 'CookieRTMPS', 'Unified OBS Overlay Ready (Enable Twitch, YouTube, or Kick in the Dashboard)', '#f59e0b', true);
+            }
+
+            // 1. Connect Twitch Chat ONLY IF ENABLED
+            const cleanTwitch = twitchParam.trim().toLowerCase();
+            if (cleanTwitch) {
+                let twitchWs = null;
+                function connectTwitch() {
+                    try {
+                        twitchWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+                        twitchWs.onopen = () => {
+                            twitchWs.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+                            twitchWs.send('PASS oauth:schmoopiie');
+                            twitchWs.send('NICK justinfan' + Math.floor(10000 + Math.random() * 90000));
+                            twitchWs.send('JOIN #' + cleanTwitch);
+                        };
+                        twitchWs.onmessage = (e) => {
+                            const raw = e.data;
+                            if (raw.startsWith('PING')) {
+                                twitchWs.send('PONG :tmi.twitch.tv');
+                                return;
+                            }
+                            if (raw.includes('PRIVMSG')) {
+                                const nameMatch = raw.match(/display-name=([^;]+)/);
+                                const colorMatch = raw.match(/color=([^;]+)/);
+                                const idMatch = raw.match(/id=([^;]+)/);
+                                const msgId = idMatch ? idMatch[1] : `tw_${Date.now()}_${Math.random()}`;
+                                if (seenMessageIds.has(msgId)) return;
+                                seenMessageIds.add(msgId);
+
+                                const splitParts = raw.split('PRIVMSG #' + cleanTwitch + ' :');
+                                const author = nameMatch && nameMatch[1] ? nameMatch[1] : 'TwitchUser';
+                                const color = colorMatch && colorMatch[1] && colorMatch[1].startsWith('#') ? colorMatch[1] : '#a855f7';
+                                const text = splitParts[1] ? splitParts[1].trim() : '';
+                                if (text) {
+                                    pushMessage('twitch', author, text, color);
+                                }
+                            }
+                        };
+                        twitchWs.onclose = () => {
+                            setTimeout(connectTwitch, 4000);
+                        };
+                        twitchWs.onerror = () => {
+                            try { twitchWs.close(); } catch(e) {}
+                        };
+                    } catch(e) {
+                        setTimeout(connectTwitch, 5000);
+                    }
+                }
+                connectTwitch();
+            }
+
+            // 2. Connect Kick Chat ONLY IF ENABLED
+            const cleanKick = kickParam.trim().toLowerCase();
+            if (cleanKick) {
+                let kickWs = null;
+                function connectKick() {
+                    fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(cleanKick)}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data && data.chatroom && data.chatroom.id) {
+                                const chatroomId = data.chatroom.id;
+                                kickWs = new WebSocket('wss://ws-us2.pusher.com/app/eb1d5f283d6d0149f4b0?protocol=7&client=js&version=7.4.0&flash=false');
+                                kickWs.onopen = () => {
+                                    kickWs.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${chatroomId}.v2` } }));
+                                };
+                                kickWs.onmessage = (e) => {
+                                    try {
+                                        const parsedEvent = JSON.parse(e.data);
+                                        if (parsedEvent.event === 'App\\Events\\ChatMessageEvent') {
+                                            const payload = JSON.parse(parsedEvent.data);
+                                            const msgId = payload.id || `kick_${Date.now()}_${Math.random()}`;
+                                            if (seenMessageIds.has(msgId)) return;
+                                            seenMessageIds.add(msgId);
+
+                                            const author = payload.sender.username;
+                                            const text = payload.content;
+                                            const color = payload.sender.identity && payload.sender.identity.color ? payload.sender.identity.color : '#22c55e';
+                                            pushMessage('kick', author, text, color);
+                                        }
+                                    } catch(err) {}
+                                };
+                                kickWs.onclose = () => setTimeout(connectKick, 5000);
+                            }
+                        }).catch(() => setTimeout(connectKick, 8000));
+                }
+                connectKick();
+            }
+
+            // 3. Connect YouTube Live Stream Chat Poller ONLY IF ENABLED
+            const cleanYt = youtubeParam.trim();
+            if (cleanYt) {
+                let ytChannelOrVideo = cleanYt;
+                let ytLiveAnnounced = false;
+
+                async function pollYouTubeChat() {
+                    try {
+                        const res = await fetch(`/api/yt_live_messages?channel=${encodeURIComponent(ytChannelOrVideo)}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data && data.isLive && data.messages) {
+                                if (!ytLiveAnnounced) {
+                                    ytLiveAnnounced = true;
+                                    pushMessage('system', 'YouTube Live', `Synced to live video ${data.videoId}`, '#ef4444', true);
+                                }
+                                for (const msg of data.messages) {
+                                    if (!seenMessageIds.has(msg.id)) {
+                                        seenMessageIds.add(msg.id);
+                                        pushMessage('youtube', msg.author, msg.text, '#ef4444');
+                                    }
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                }
+
+                pollYouTubeChat();
+                setInterval(pollYouTubeChat, 2500);
+            }
+
+            // Demo / Test messages support if requested via URL
+            if (isTestMode) {
+                if (twitchParam) setTimeout(() => pushMessage('twitch', 'TwitchViewer', 'Hello from Twitch! 🟣', '#a855f7'), 600);
+                if (youtubeParam) setTimeout(() => pushMessage('youtube', 'YouTubeStreamer', 'YouTube live chat integrated seamlessly! 🔴', '#ef4444'), 1200);
+                if (kickParam) setTimeout(() => pushMessage('kick', 'KickChatter', 'Kick chat working loud and clear! 🟢', '#22c55e'), 1800);
+            }
+
+        } else {
+            // -----------------------------------------------------------
+            // MODE 2: MULTI-COLUMN SIDE-BY-SIDE MODE
+            // -----------------------------------------------------------
+            const container = document.getElementById('chat-container');
+
+            const parentHosts = [
+                currentHost,
+                'localhost',
+                '127.0.0.1',
+                'ais-dev-qjysryqbvl3lyvtbzutn3v-451738151228.us-west2.run.app',
+                'ais-pre-qjysryqbvl3lyvtbzutn3v-451738151228.us-west2.run.app'
+            ];
+            const parentQueryParams = parentHosts.map(h => `parent=${encodeURIComponent(h)}`).join('&');
+
+            // 1. TWITCH COLUMN (ONLY IF ENABLED)
+            if (twitchParam) {
+                const ch = twitchParam.toLowerCase();
+                const col = document.createElement('div');
+                col.className = 'chat-column';
+
+                const header = document.createElement('div');
+                header.className = 'column-header';
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-twitch';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${TWITCH_SVG} Twitch`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.target = '_blank';
+                const safeTwitch = encodeURIComponent(ch.replace(/[^a-zA-Z0-9_]/g, ''));
+                popout.href = `https://www.twitch.tv/popout/${safeTwitch}/chat`;
+                popout.textContent = 'Popout ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
+                col.appendChild(header);
+
+                const iframe = document.createElement('iframe');
+                iframe.src = `https://www.twitch.tv/embed/${encodeURIComponent(ch)}/chat?${parentQueryParams}&darkpopout=true`;
+                col.appendChild(iframe);
+                container.appendChild(col);
+            }
+
+            // 2. YOUTUBE COLUMN (ONLY IF ENABLED)
+            if (youtubeParam) {
+                const rawYt = youtubeParam;
+                const cleanHandle = extractCleanHandle(rawYt);
+                const directVid = extractVideoId(rawYt);
+
+                const col = document.createElement('div');
+                col.className = 'chat-column';
+
+                const header = document.createElement('div');
+                header.className = 'column-header';
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-youtube';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${YOUTUBE_SVG} YouTube`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.id = 'yt-popout';
+                popout.target = '_blank';
+                const safeYtHandle = encodeURIComponent(cleanHandle);
+                popout.href = `https://www.youtube.com/@${safeYtHandle}/live`;
+                popout.textContent = 'Live Page ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
+                col.appendChild(header);
+
+                let currentIframe = null;
+
+                function loadYouTubeChat(videoId) {
+                    if (currentIframe) {
+                        try { col.removeChild(currentIframe); } catch(e) {}
+                    }
+                    const watcher = col.querySelector('.yt-watcher-card');
+                    if (watcher) {
+                        try { col.removeChild(watcher); } catch(e) {}
+                    }
+
+                    const popout = col.querySelector('#yt-popout');
+                    if (popout) {
+                        const safeVid = encodeURIComponent(videoId.replace(/[^a-zA-Z0-9_-]/g, ''));
+                        popout.href = `https://www.youtube.com/live_chat?v=${safeVid}`;
+                    }
+
+                    const iframe = document.createElement('iframe');
+                    iframe.src = `https://www.youtube.com/live_chat?v=${encodeURIComponent(videoId)}&embed_domain=${encodeURIComponent(currentHost)}`;
+                    col.appendChild(iframe);
+                    currentIframe = iframe;
+                }
+
+                if (directVid) {
+                    loadYouTubeChat(directVid);
+                } else {
+                    const watcher = document.createElement('div');
+                    watcher.className = 'yt-watcher-card';
+
+                    const ytBox = document.createElement('div');
+                    ytBox.className = 'yt-box';
+
+                    const spinner = document.createElement('div');
+                    spinner.className = 'radar-spinner';
+                    ytBox.appendChild(spinner);
+
+                    const titleEl = document.createElement('div');
+                    titleEl.style.fontWeight = '700';
+                    titleEl.style.fontSize = '14px';
+                    titleEl.style.color = '#f8fafc';
+                    titleEl.textContent = 'Waiting for YouTube Live Stream';
+                    ytBox.appendChild(titleEl);
+
+                    const handleEl = document.createElement('div');
+                    handleEl.style.fontSize = '12px';
+                    handleEl.style.color = '#ef4444';
+                    handleEl.style.marginTop = '4px';
+                    handleEl.style.fontWeight = '600';
+                    handleEl.textContent = `@${cleanHandle}`; // Safe textContent escaping against XSS
+                    ytBox.appendChild(handleEl);
+
+                    const infoEl = document.createElement('div');
+                    infoEl.style.fontSize = '11px';
+                    infoEl.style.color = '#94a3b8';
+                    infoEl.style.marginTop = '8px';
+                    infoEl.style.lineHeight = '1.4';
+                    infoEl.textContent = 'Checking every 8s... As soon as you go live on YouTube, live chat will automatically load here.';
+                    ytBox.appendChild(infoEl);
+
+                    const inp = document.createElement('input');
+                    inp.className = 'yt-input';
+                    inp.placeholder = 'Or paste Video ID e.g. jfKfPfyJRdk';
+                    ytBox.appendChild(inp);
+
+                    const btn = document.createElement('button');
+                    btn.className = 'yt-btn';
+                    btn.textContent = 'Load Live Chat';
+                    ytBox.appendChild(btn);
+
+                    const liveLink = document.createElement('a');
+                    liveLink.target = '_blank';
+                    liveLink.style.display = 'block';
+                    liveLink.style.marginTop = '10px';
+                    liveLink.style.fontSize = '11px';
+                    liveLink.style.color = '#f59e0b';
+                    liveLink.style.textDecoration = 'underline';
+                    const safeEncHandle = encodeURIComponent(cleanHandle);
+                    liveLink.href = `https://www.youtube.com/@${safeEncHandle}/live`;
+                    liveLink.textContent = 'Open Channel Live Page';
+                    ytBox.appendChild(liveLink);
+
+                    watcher.appendChild(ytBox);
+                    col.appendChild(watcher);
+
+                    const inpEl = watcher.querySelector('.yt-input');
+                    const btnEl = watcher.querySelector('.yt-btn');
+                    btnEl.onclick = () => {
+                        const vid = extractVideoId(inpEl.value);
+                        if (vid) loadYouTubeChat(vid);
+                    };
+
+                    async function checkYTLive() {
+                        if (currentIframe) return;
+                        try {
+                            const res = await fetch(`/yt_video_id?channel=${encodeURIComponent(cleanHandle)}`);
+                            if (res.ok) {
+                                const resolvedId = (await res.text()).trim();
+                                if (resolvedId && resolvedId.length === 11) {
+                                    loadYouTubeChat(resolvedId);
+                                }
+                            }
+                        } catch(e) {}
+                    }
+
+                    checkYTLive();
+                    setInterval(checkYTLive, 8000);
+                }
+
+                container.appendChild(col);
+            }
+
+            // 3. KICK COLUMN (ONLY IF ENABLED)
+            if (kickParam) {
+                const ch = kickParam;
+                const col = document.createElement('div');
+                col.className = 'chat-column';
+
+                const header = document.createElement('div');
+                header.className = 'column-header';
+
+                const badge = document.createElement('span');
+                badge.className = 'platform-badge platform-kick';
+                badge.style.padding = '2px 5px';
+                badge.innerHTML = `${KICK_SVG} Kick`;
+
+                const popout = document.createElement('a');
+                popout.className = 'popout-btn';
+                popout.target = '_blank';
+                const safeKick = encodeURIComponent(ch.replace(/[^a-zA-Z0-9_]/g, ''));
+                popout.href = `https://kick.com/popout/${safeKick}/chat`;
+                popout.textContent = 'Popout ↗';
+
+                header.appendChild(badge);
+                header.appendChild(popout);
+                col.appendChild(header);
+
+                const iframe = document.createElement('iframe');
+                iframe.src = `https://kick.com/popout/${encodeURIComponent(ch)}/chat`;
+                col.appendChild(iframe);
+                container.appendChild(col);
+            }
+        }
+    </script>
+</body>
+</html>

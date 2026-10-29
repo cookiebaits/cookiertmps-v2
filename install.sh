@@ -148,9 +148,10 @@ PORT_HTTP="80"
 PORT_HTTPS="443"
 PORT_STATS="8081"
 
-# Website address
+# Website address & Web UI Toggle
 CLOUDFLARE_PROXY="false"
 DOMAIN_PROMPTED="false"
+DISABLE_WEB_UI="false"
 
 # Disconnection Protection (NOALBS_ENABLED kept as the setting name for saved configs)
 NOALBS_ENABLED="true"
@@ -228,6 +229,7 @@ TWITCH_OAUTH_TOKEN="$TWITCH_OAUTH_TOKEN"
 TWITCH_BROADCASTER_ID="$TWITCH_BROADCASTER_ID"
 CLOUDFLARE_PROXY="$CLOUDFLARE_PROXY"
 DOMAIN_PROMPTED="$DOMAIN_PROMPTED"
+DISABLE_WEB_UI="$DISABLE_WEB_UI"
 NOALBS_ENABLED="$NOALBS_ENABLED"
 LOW_BITRATE="$LOW_BITRATE"
 RESTORE_BITRATE="$RESTORE_BITRATE"
@@ -884,15 +886,16 @@ configure_obs() {
 
 configure_domain() {
     clear
-    echo -e "${GREEN}=== Website Address / Cloudflare Reverse Proxy ===${NC}"
+    echo -e "${GREEN}=== Website Address & Web Dashboard Access ===${NC}"
     echo -e "By default the settings website is reachable at your VPS IP: http://${SERVER_IP}/"
     echo -e "Current domain: ${SERVER_DOMAIN:-None (using VPS IP)}"
     echo -e "Cloudflare proxy: $([ "$CLOUDFLARE_PROXY" == "true" ] && echo "ON" || echo "OFF")"
+    echo -e "Web Dashboard:   $([ "$DISABLE_WEB_UI" == "true" ] && echo -e "${RED}DISABLED (Returns 403)${NC}" || echo -e "${GREEN}ENABLED${NC}")"
     echo ""
-    echo -e "Do you want to set up a Cloudflare reverse proxy (domain) for the settings website?"
-    echo "1) Yes, use a Cloudflare domain"
-    echo "2) No, use the VPS IP address"
-    echo "3) Keep current setting"
+    echo "1) Use a Cloudflare domain"
+    echo "2) Use the VPS IP address"
+    echo "3) Toggle Web Dashboard Access ($([ "$DISABLE_WEB_UI" == "true" ] && echo "Enable" || echo "Disable"))"
+    echo "4) Keep current settings & exit"
     echo -e "Selection: \c"
     read -r cf_choice
     case $cf_choice in
@@ -904,13 +907,6 @@ configure_domain() {
                 SERVER_DOMAIN="$dom_input"
                 CLOUDFLARE_PROXY="true"
                 echo -e "${GREEN}Domain set to: $SERVER_DOMAIN${NC}"
-                echo ""
-                echo -e "${YELLOW}In your Cloudflare dashboard:${NC}"
-                echo -e "  1. DNS: add an 'A' record for ${SERVER_DOMAIN} pointing to ${SERVER_IP}, Proxy status ON (orange cloud)."
-                echo -e "  2. SSL/TLS: set encryption mode to 'Full'."
-                echo -e "  3. Website: https://${SERVER_DOMAIN}/  (served on ports 80/443 of this VPS)"
-                echo -e "  Note: Cloudflare's proxy does not carry RTMP. Point OBS at the VPS IP"
-                echo -e "        (rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}) or use a separate grey-cloud record for streaming."
             else
                 echo -e "${RED}That is not a valid domain. Keeping current setting.${NC}"
             fi
@@ -919,6 +915,18 @@ configure_domain() {
             SERVER_DOMAIN=""
             CLOUDFLARE_PROXY="false"
             echo -e "${GREEN}The settings website will use the VPS IP: http://${SERVER_IP}/${NC}"
+            ;;
+        3)
+            if [ "$DISABLE_WEB_UI" == "true" ]; then
+                DISABLE_WEB_UI="false"
+                rm -f ./data/disable_web_ui.flag 2>/dev/null || true
+                echo -e "${GREEN}Web Dashboard is now ENABLED.${NC}"
+            else
+                DISABLE_WEB_UI="true"
+                mkdir -p ./data
+                touch ./data/disable_web_ui.flag
+                echo -e "${YELLOW}Web Dashboard is now DISABLED (Nginx will return 403 Forbidden).${NC}"
+            fi
             ;;
     esac
     DOMAIN_PROMPTED="true"
@@ -1451,6 +1459,7 @@ build_and_run() {
         -e TWITCH_OAUTH_TOKEN="$TWITCH_OAUTH_TOKEN" \
         -e TWITCH_BROADCASTER_ID="$TWITCH_BROADCASTER_ID" \
         -e SERVER_DOMAIN="$SERVER_DOMAIN" \
+        -e DISABLE_WEB_UI="$DISABLE_WEB_UI" \
         -e NOALBS_ENABLED="$NOALBS_ENABLED" \
         -e LOW_BITRATE="$LOW_BITRATE" \
         -e RESTORE_BITRATE="$RESTORE_BITRATE" \

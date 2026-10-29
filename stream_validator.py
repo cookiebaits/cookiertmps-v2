@@ -422,6 +422,49 @@ def protection_status():
     data['videoUrl'] = os.getenv('BRB_VIDEO_URL', '')
     return json_response(data)
 
+DISABLE_WEB_UI_FLAG = '/app/data/disable_web_ui.flag'
+
+if os.getenv('DISABLE_WEB_UI', 'false').lower() == 'true':
+    try:
+        os.makedirs('/app/data', exist_ok=True)
+        open(DISABLE_WEB_UI_FLAG, 'a').close()
+    except Exception as e:
+        app.logger.error(f"Error creating disable_web_ui.flag: {e}")
+
+@app.route('/api/web_ui/status', methods=['GET'])
+def web_ui_status():
+    if not is_authorized():
+        return unauthorized()
+    is_disabled = os.path.exists(DISABLE_WEB_UI_FLAG)
+    return json_response({'disabled': is_disabled})
+
+@app.route('/api/web_ui/toggle', methods=['POST'])
+def web_ui_toggle():
+    if not is_authorized():
+        return unauthorized()
+    data = request.get_json(silent=True) or {}
+    target_state = data.get('disabled')
+    try:
+        os.makedirs('/app/data', exist_ok=True)
+        if target_state is None:
+            if os.path.exists(DISABLE_WEB_UI_FLAG):
+                os.remove(DISABLE_WEB_UI_FLAG)
+                new_disabled = False
+            else:
+                open(DISABLE_WEB_UI_FLAG, 'w').close()
+                new_disabled = True
+        elif target_state is True:
+            open(DISABLE_WEB_UI_FLAG, 'w').close()
+            new_disabled = True
+        else:
+            if os.path.exists(DISABLE_WEB_UI_FLAG):
+                os.remove(DISABLE_WEB_UI_FLAG)
+            new_disabled = False
+        return json_response({'success': True, 'disabled': new_disabled})
+    except Exception as e:
+        app.logger.error(f"Error toggling web UI: {e}")
+        return json_response({'success': False, 'message': str(e)}, 500)
+
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8082, debug=False)
 

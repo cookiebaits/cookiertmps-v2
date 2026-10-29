@@ -27,9 +27,11 @@ stream {
     }
 }
 
-http {
-    include       mime.types;
-    default_type  application/octet-stream;
+    # Performance & Stability Settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
 
     # Cloudflare Real IP (IPv4 & IPv6)
     set_real_ip_from 103.21.244.0/22;
@@ -100,6 +102,9 @@ http {
         location / {
             root /usr/local/nginx/html;
             index index.html;
+            if (-f /app/data/disable_web_ui.flag) {
+                return 403 "Web Dashboard is disabled by administrator.\n";
+            }
             try_files $uri $uri/ /index.html;
         }
 
@@ -149,6 +154,9 @@ http {
         location / {
             root /usr/local/nginx/html;
             index index.html;
+            if (-f /app/data/disable_web_ui.flag) {
+                return 403 "Web Dashboard is disabled by administrator.\n";
+            }
             try_files $uri $uri/ /index.html;
         }
     }
@@ -176,15 +184,17 @@ rtmp {
         listen 19359;
         chunk_size ${CHUNK_SIZE};
 
-        # Throughput and Buffer Optimization for Upload Speeds
-        max_message 10M;
-        out_queue 4096;
-        out_cork 8;
+        # Throughput and Buffer Optimization for Upload Speeds & Zero Disconnects
+        max_message 32M;
+        out_queue 8192;
+        out_cork 16;
+        max_streams 128;
+        ack_window 5000000;
 
-        # Stability and Security Enhancements
-        ping 15s;
-        ping_timeout 5s;
-        drop_idle_publisher 4s;
+        # Stability and Anti-Disconnect Timeout Adjustments
+        ping 30s;
+        ping_timeout 15s;
+        drop_idle_publisher 20s;
         allow play 127.0.0.1;
         deny play all;
 

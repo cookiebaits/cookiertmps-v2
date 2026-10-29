@@ -38,7 +38,7 @@ MTX_RTMP_PORT = int(os.getenv("MEDIAMTX_RTMP_PORT", "1937"))
 MTX_API_PORT = int(os.getenv("MEDIAMTX_API_PORT", "9997"))
 DEFAULT_VIDEO_URL = "https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
 
-LOW_GRACE_SECONDS = 3
+LOW_GRACE_SECONDS = 5
 RESTORE_GRACE_SECONDS = 3
 BITRATE_WINDOW_SECONDS = 2
 
@@ -277,17 +277,18 @@ class Channel:
     def feed_cmd(self):
         src = f"{NGINX_RTMP}/{self.ingest_app}/{self.stream_name}"
         if not self.protected:
-            return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "5000000", "-i", src,
-                    "-map", "0", "-c", "copy", "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
-        return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "5000000", "-i", src,
+            return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "15000000", "-i", src,
+                    "-map", "0", "-c", "copy", "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "4096", "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
+        return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "15000000", "-i", src,
                 "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
                 "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+                "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "4096",
                 "-f", "flv", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}"]
 
     def relay_cmd(self):
-        return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "10000000",
+        return ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-rw_timeout", "15000000",
                 "-i", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}",
-                "-map", "0", "-c", "copy", "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
+                "-map", "0", "-c", "copy", "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "4096", "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
 
     def start_feed(self):
         self.stop_feed()

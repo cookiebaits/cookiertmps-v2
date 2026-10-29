@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StreamValidatorLog } from '../types';
-import { ShieldCheck, ShieldAlert, Play, Check, AlertTriangle, Terminal, Lock } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Play, Check, AlertTriangle, Terminal, Lock, Globe, Power, Radio, Activity, Wifi, RefreshCw } from 'lucide-react';
+import { authFetch } from '../api';
 
 export const SecurityAndValidatorTab: React.FC = () => {
   const [acceptedIp, setAcceptedIp] = useState<string>('192.168.1.0/24, 10.0.0.1');
@@ -8,6 +9,11 @@ export const SecurityAndValidatorTab: React.FC = () => {
   const [testClientIp, setTestClientIp] = useState<string>('192.168.1.50');
   const [testAppName, setTestAppName] = useState<string>('live');
   
+  // Web Dashboard Disable State
+  const [isWebUiDisabled, setIsWebUiDisabled] = useState<boolean>(false);
+  const [isTogglingWebUi, setIsTogglingWebUi] = useState<boolean>(false);
+  const [webUiMsg, setWebUiMsg] = useState<string | null>(null);
+
   const [testResult, setTestResult] = useState<{
     status: number;
     text: string;
@@ -43,6 +49,46 @@ export const SecurityAndValidatorTab: React.FC = () => {
       message: 'ACCEPTED vertical stream from 127.0.0.1',
     },
   ]);
+
+  useEffect(() => {
+    authFetch('/api/web_ui/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && typeof data.disabled === 'boolean') {
+          setIsWebUiDisabled(data.disabled);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleWebUi = async () => {
+    setIsTogglingWebUi(true);
+    setWebUiMsg(null);
+    try {
+      const nextState = !isWebUiDisabled;
+      const res = await authFetch('/api/web_ui/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ disabled: nextState }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsWebUiDisabled(data.disabled);
+        setWebUiMsg(
+          data.disabled
+            ? 'Web Dashboard is now DISABLED for public access. Returns 403 to visitors.'
+            : 'Web Dashboard is now ENABLED for normal control panel access.'
+        );
+      } else {
+        setWebUiMsg(data.message || 'Failed to toggle Web Dashboard state.');
+      }
+    } catch (e) {
+      setWebUiMsg('Connection error toggling Web Dashboard.');
+    } finally {
+      setIsTogglingWebUi(false);
+      setTimeout(() => setWebUiMsg(null), 5000);
+    }
+  };
 
   const handleTestValidator = async () => {
     try {
@@ -100,10 +146,10 @@ export const SecurityAndValidatorTab: React.FC = () => {
         <div>
           <h2 className="text-lg font-bold text-slate-100 flex items-center space-x-2">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <span>IP Whitelist & Stream Key Validator Inspector</span>
+            <span>IP Whitelist, Anti-Disconnect Stability & Web Page Access</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            CookieRTMPS uses strict key check logic + IP whitelisting to eliminate stream hijacking risks.
+            CookieRTMPS features hardened RTMP buffer queues, Stunnel auto-reconnect, and dynamic Web UI disabling for high-security stream operations.
           </p>
         </div>
 
@@ -111,6 +157,117 @@ export const SecurityAndValidatorTab: React.FC = () => {
           <Lock className="w-4 h-4 text-emerald-400" />
           <span className="font-mono text-slate-300">CF-Connecting-IP Real-IP Header Active</span>
         </div>
+      </div>
+
+      {/* Stream Stability & Web Page Control Cards Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Anti-Disconnect Traffic & Stream Stability Overview */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                <Radio className="w-4 h-4 text-amber-400" />
+                <span>YouTube & Twitch Stream Stability Controls</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">Zero-disconnect buffer and socket configuration</p>
+            </div>
+            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono font-bold">
+              STABILITY ACTIVE
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 font-semibold block">Drop Idle Protection</span>
+              <span className="text-amber-400 font-bold font-mono text-sm">20 Seconds</span>
+              <p className="text-[10px] text-slate-400">Prevents disconnects during network jitter</p>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 font-semibold block">Stunnel TLS Keepalive</span>
+              <span className="text-emerald-400 font-bold font-mono text-sm">SO_KEEPALIVE=1</span>
+              <p className="text-[10px] text-slate-400">Auto-reconnects YouTube & Twitch RTMPS</p>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 font-semibold block">Nginx Message Buffer</span>
+              <span className="text-blue-400 font-bold font-mono text-sm">32MB / Queue 8192</span>
+              <p className="text-[10px] text-slate-400">Zero frame dropping under high bitrates</p>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 font-semibold block">Socket Buffer Allocation</span>
+              <span className="text-purple-400 font-bold font-mono text-sm">4MB Send/Receive</span>
+              <p className="text-[10px] text-slate-400">Smooth flow for 1080p60 & 4K streams</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Disable Web Dashboard Control Card */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                <Globe className="w-4 h-4 text-amber-400" />
+                <span>Web Dashboard Access Control</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">Optionally disable web page HTTP access</p>
+            </div>
+            <span
+              className={`text-[10px] px-2.5 py-0.5 rounded font-mono font-bold border ${
+                isWebUiDisabled
+                  ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+              }`}
+            >
+              {isWebUiDisabled ? 'WEB PAGE DISABLED' : 'WEB PAGE ACTIVE'}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-200">
+                  {isWebUiDisabled ? 'Web Page Access is Currently Disabled' : 'Web Page Access is Currently Enabled'}
+                </span>
+                <button
+                  onClick={handleToggleWebUi}
+                  disabled={isTogglingWebUi}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-md ${
+                    isWebUiDisabled
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                      : 'bg-rose-500 hover:bg-rose-400 text-slate-950 shadow-rose-500/20'
+                  }`}
+                >
+                  <Power className="w-3.5 h-3.5" />
+                  <span>
+                    {isTogglingWebUi
+                      ? 'Updating...'
+                      : isWebUiDisabled
+                        ? 'Enable Web Page'
+                        : 'Disable Web Page'}
+                  </span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                When disabled, Nginx returns <code className="text-rose-300 font-mono">403 Forbidden</code> for visitors accessing the web dashboard site. Your RTMP stream ingests, stream validator, and disconnection protection will remain 100% operational.
+              </p>
+
+              {webUiMsg && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono animate-fade-in">
+                  {webUiMsg}
+                </div>
+              )}
+            </div>
+
+            <p className="text-[10px] text-slate-500 font-mono">
+              Note: You can also toggle this via <code className="text-amber-400">./install.sh</code> menu option 10 on your host VPS or by setting <code className="text-amber-400">DISABLE_WEB_UI=true</code>.
+            </p>
+          </div>
+        </div>
+
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

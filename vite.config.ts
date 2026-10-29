@@ -399,6 +399,35 @@ export default defineConfig({
             return;
           }
 
+          if (url.startsWith('/api/web_ui/status')) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ disabled: false }));
+            return;
+          }
+
+          if (url.startsWith('/api/web_ui/toggle')) {
+            if (req.method === 'POST') {
+              let body = '';
+              req.on('data', chunk => body += chunk);
+              req.on('end', () => {
+                try {
+                  const data = JSON.parse(body || '{}');
+                  const nextState = typeof data.disabled === 'boolean' ? data.disabled : true;
+                  res.setHeader('Content-Type', 'application/json');
+                  res.end(JSON.stringify({ success: true, disabled: nextState }));
+                } catch {
+                  res.statusCode = 400;
+                  res.setHeader('Content-Type', 'application/json');
+                  res.end(JSON.stringify({ success: false, message: 'Invalid JSON request' }));
+                }
+              });
+            } else {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ disabled: false }));
+            }
+            return;
+          }
+
           if (url.startsWith('/publish_done')) {
             res.setHeader('Content-Type', 'text/plain');
             res.end('OK');
@@ -413,6 +442,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
-    strictPort: true
+    strictPort: true,
+    allowedHosts: true
   }
 });
