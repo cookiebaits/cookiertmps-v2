@@ -59,9 +59,11 @@ stream {
     real_ip_header CF-Connecting-IP;
     real_ip_recursive on;
 
-    # HTTP Server (Port 80)
+    client_max_body_size 64M;
+
+    # HTTP Server (Alternative Port ${PORT_HTTP}, avoids restricted ports 80 and 443)
     server {
-        listen 80 default_server;
+        listen ${PORT_HTTP} default_server;
         server_name ${SERVER_DOMAIN} _;
 
         # ACME Challenge for Certbot
@@ -103,16 +105,16 @@ stream {
             root /usr/local/nginx/html;
             index index.html;
             if (-f /app/data/disable_web_ui.flag) {
-                return 403 "Web Dashboard is disabled by administrator.\n";
+                return 403 "Web Dashboard is disabled by administrator. Enable via settings or install menu.\n";
             }
             try_files $uri $uri/ /index.html;
         }
 
     }
 
-    # HTTPS Server (Internal Port 8443, Fused from 443)
+    # HTTPS Server (Alternative Port ${PORT_HTTPS}, avoids restricted ports 80 and 443)
     server {
-        listen 8443 ssl default_server;
+        listen ${PORT_HTTPS} ssl default_server;
         server_name ${SERVER_DOMAIN} _;
 
         ssl_certificate /etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem;
@@ -155,7 +157,7 @@ stream {
             root /usr/local/nginx/html;
             index index.html;
             if (-f /app/data/disable_web_ui.flag) {
-                return 403 "Web Dashboard is disabled by administrator.\n";
+                return 403 "Web Dashboard is disabled by administrator. Enable via settings or install menu.\n";
             }
             try_files $uri $uri/ /index.html;
         }
@@ -184,12 +186,13 @@ rtmp {
         listen 19359;
         chunk_size ${CHUNK_SIZE};
 
-        # Throughput and Buffer Optimization for Upload Speeds & Zero Disconnects
-        max_message 32M;
-        out_queue 8192;
-        out_cork 16;
+        # Throughput, Upload Speed Prioritization & Anti-Disconnect Buffers
+        max_message 64M;
+        out_queue 16384;
+        out_cork 32;
         max_streams 128;
-        ack_window 5000000;
+        ack_window 10000000;
+        so_keepalive on;
 
         # Stability and Anti-Disconnect Timeout Adjustments
         ping 30s;

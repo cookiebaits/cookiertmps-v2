@@ -142,16 +142,16 @@ CHAT_KICK=""
 CHAT_TIKTOK=""
 CHAT_HEX_KEY=""
 
-# Host Port Settings
+# Host Port Settings (Avoid restricted/conflicting ports 80 and 443)
 PORT_RTMP="1935"
-PORT_HTTP="80"
-PORT_HTTPS="443"
+PORT_HTTP="8080"
+PORT_HTTPS="8443"
 PORT_STATS="8081"
 
-# Website address & Web UI Toggle
+# Website address & Web UI Toggle (Default: Web UI Disabled)
 CLOUDFLARE_PROXY="false"
 DOMAIN_PROMPTED="false"
-DISABLE_WEB_UI="false"
+DISABLE_WEB_UI="true"
 
 # Disconnection Protection (NOALBS_ENABLED kept as the setting name for saved configs)
 NOALBS_ENABLED="true"
@@ -168,9 +168,10 @@ if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
 
-# Older installs served the website on 81/8443; it now lives on the standard 80/443.
-[ "$PORT_HTTP" == "81" ] && PORT_HTTP="80"
-[ "$PORT_HTTPS" == "8443" ] && PORT_HTTPS="443"
+# Strictly avoid restricted ports 80 and 443
+[ "$PORT_HTTP" == "80" ] && PORT_HTTP="8080"
+[ "$PORT_HTTP" == "81" ] && PORT_HTTP="8080"
+[ "$PORT_HTTPS" == "443" ] && PORT_HTTPS="8443"
 
 save_config() {
     cat <<ENV_EOF > "$CONFIG_FILE"
@@ -1209,7 +1210,7 @@ configure_protection() {
 }
 
 enable_bbr_and_tcp_optimizations() {
-    echo -e "${GREEN}Configuring Google BBR & Network TCP Buffer Optimizations...${NC}"
+    echo -e "${GREEN}Configuring Google BBR, High Upload Speed Prioritization & WireGuard TCP Optimizations...${NC}"
     if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
         SUDO="sudo"
     else
@@ -1219,21 +1220,44 @@ enable_bbr_and_tcp_optimizations() {
     $SUDO modprobe tcp_bbr 2>/dev/null || true
 
     SYSCTL_CONF="/etc/sysctl.d/99-stream-optimization.conf"
-    echo -e "${YELLOW}Writing sysctl network tuning parameters to $SYSCTL_CONF ...${NC}"
+    echo -e "${YELLOW}Writing high upload & WireGuard tuning parameters to $SYSCTL_CONF ...${NC}"
 
     cat << 'SYSCTL_EOF' | $SUDO tee "$SYSCTL_CONF" >/dev/null
-# Google BBR Congestion Control & Buffer Tuning
+# Google BBR Congestion Control & Upload Speed Prioritization
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 87380 16777216
-net.ipv4.tcp_wmem = 4096 65536 16777216
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+net.ipv4.tcp_rmem = 4096 87380 33554432
+net.ipv4.tcp_wmem = 4096 65536 33554432
 net.ipv4.tcp_notsent_lowat = 16384
+net.core.netdev_max_backlog = 16384
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_adv_win_scale = 1
+net.ipv4.tcp_no_metrics_save = 1
+
+# WireGuard Traffic Compatibility & PMTU Black Hole Prevention
+# Solves dropped packets when streaming over MTU-clamped tunnels (WireGuard 1420/1280 MTU)
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_base_mss = 1024
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.forwarding = 1
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
 SYSCTL_EOF
 
     $SUDO sysctl -p "$SYSCTL_CONF" 2>/dev/null || $SUDO sysctl --system 2>/dev/null || true
-    echo -e "${GREEN}Network TCP buffer optimizations applied successfully.${NC}"
+
+    # Clamp TCP MSS to Path MTU via iptables if available to ensure zero WireGuard packet fragmentation
+    if command -v iptables &> /dev/null; then
+        $SUDO iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+        $SUDO iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}Upload speed prioritization and WireGuard tunnel optimizations applied successfully.${NC}"
 }
 
 configure_optimizations() {
@@ -1399,13 +1423,22 @@ build_and_run() {
 
     echo -e "${GREEN}Starting container...${NC}"
 
-    # RTMP ingest, website over HTTP, and website over HTTPS (Cloudflare 'Full' SSL connects to 443)
-    PORT_MAPS="-p ${PORT_RTMP}:1935 -p ${PORT_HTTP}:80 -p ${PORT_HTTPS}:8443"
+    # RTMP ingest, website over HTTP, and website over HTTPS (Alternative non-privileged ports, avoiding 80/443)
+    PORT_MAPS="-p ${PORT_RTMP}:1935 -p ${PORT_HTTP}:${PORT_HTTP} -p ${PORT_HTTPS}:${PORT_HTTPS}"
+
+    mkdir -p ./data
+    if [ "$DISABLE_WEB_UI" == "true" ]; then
+        touch ./data/disable_web_ui.flag
+    else
+        rm -f ./data/disable_web_ui.flag 2>/dev/null || true
+    fi
 
     # Start the container
     docker run -d --name cookie-rtmps \
         $PORT_MAPS \
         --restart unless-stopped \
+        -e PORT_HTTP="$PORT_HTTP" \
+        -e PORT_HTTPS="$PORT_HTTPS" \
         -e YOUTUBE_URL="$YOUTUBE_URL" \
         -e YOUTUBE_KEY="$YOUTUBE_KEY" \
         -e FACEBOOK_URL="$FACEBOOK_URL" \
@@ -1570,19 +1603,19 @@ deep_cleanup_ports_and_processes() {
         SUDO=""
     fi
 
-    # NOTE: Port 80 is strictly preserved and never stopped, killed, or unbound.
-    # Host webservers (apache2, nginx, lighttpd) running on port 80 are not touched.
+    # NOTE: Ports 80 and 443 are strictly preserved and never stopped, killed, or unbound.
+    # WireGuard tunnels (UDP 51820/51821) and host webservers are never touched.
 
-    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_STATS" 8081 1935 8443 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359)
+    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_STATS" 8081 1935 8443 8080 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359)
     local PORTS=()
     for p in "${CANDIDATE_PORTS[@]}"; do
-        # Do not include port 80 under any circumstances
-        if [ "$p" != "80" ] && [ "$p" != "443" ] && [ -n "$p" ]; then
+        # Do not include port 80, 443, 51820, 51821 under any circumstances
+        if [ "$p" != "80" ] && [ "$p" != "443" ] && [ "$p" != "51820" ] && [ "$p" != "51821" ] && [ -n "$p" ]; then
             PORTS+=("$p")
         fi
     done
 
-    # Find and stop any docker containers publishing application ports (excluding port 80)
+    # Find and stop any docker containers publishing application ports (excluding port 80, 443, 51820)
     if command -v docker &> /dev/null; then
         for port in "${PORTS[@]}"; do
             local cids
@@ -1595,23 +1628,23 @@ deep_cleanup_ports_and_processes() {
     fi
 
     for port in "${PORTS[@]}"; do
-        if command -v fuser &> /dev/null; then
-            $SUDO fuser -k -9 "${port}/tcp" 2>/dev/null || true
-            $SUDO fuser -k -9 "${port}/udp" 2>/dev/null || true
-        fi
         if command -v lsof &> /dev/null; then
             local pids
             pids=$($SUDO lsof -t -i :"$port" 2>/dev/null || true)
-            if [ -n "$pids" ]; then
-                $SUDO kill -9 $pids 2>/dev/null || true
-            fi
-        fi
-        if command -v ss &> /dev/null; then
-            local pids
-            pids=$($SUDO ss -lptn "sport = :$port" 2>/dev/null | grep -oP 'pid=\K\d+' | sort -u || true)
-            if [ -n "$pids" ]; then
-                $SUDO kill -9 $pids 2>/dev/null || true
-            fi
+            for pid in $pids; do
+                if [ -n "$pid" ]; then
+                    local comm
+                    comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+                    # Protect WireGuard and systemd processes
+                    if [[ "$comm" =~ (wg|wireguard|systemd) ]]; then
+                        continue
+                    fi
+                    $SUDO kill -9 "$pid" 2>/dev/null || true
+                fi
+            done
+        elif command -v fuser &> /dev/null; then
+            $SUDO fuser -k -9 "${port}/tcp" 2>/dev/null || true
+            $SUDO fuser -k -9 "${port}/udp" 2>/dev/null || true
         fi
     done
 

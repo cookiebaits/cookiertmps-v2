@@ -146,60 +146,104 @@ export const SecurityAndValidatorTab: React.FC = () => {
         <div>
           <h2 className="text-lg font-bold text-slate-100 flex items-center space-x-2">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <span>IP Whitelist, Anti-Disconnect Stability & Web Page Access</span>
+            <span>Upload Speed Prioritization, WireGuard Tuning & Access Control</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            CookieRTMPS features hardened RTMP buffer queues, Stunnel auto-reconnect, and dynamic Web UI disabling for high-security stream operations.
+            Running on non-privileged alternative ports (8080 HTTP & 8443 HTTPS). Zero use of ports 80/443. Web Dashboard disabled by default.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-          <Lock className="w-4 h-4 text-emerald-400" />
-          <span className="font-mono text-slate-300">CF-Connecting-IP Real-IP Header Active</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+            <Wifi className="w-4 h-4 text-cyan-400" />
+            <span className="font-mono text-slate-300">WireGuard PMTU Probing ON</span>
+          </div>
+          <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+            <Lock className="w-4 h-4 text-emerald-400" />
+            <span className="font-mono text-slate-300">Ports 8080/8443 Active (No 80/443)</span>
+          </div>
         </div>
       </div>
 
-      {/* Stream Stability & Web Page Control Cards Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Stream Stability, Upload Speed, WireGuard & Web Page Control Cards Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Anti-Disconnect Traffic & Stream Stability Overview */}
+        {/* Upload Speed Prioritization Overview */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
           <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <Radio className="w-4 h-4 text-amber-400" />
-                <span>YouTube & Twitch Stream Stability Controls</span>
+                <span>Upload Speed Prioritization</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">Zero-disconnect buffer and socket configuration</p>
+              <p className="text-xs text-slate-400 mt-0.5">High-bitrate pacing & frame delivery</p>
             </div>
-            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono font-bold">
-              STABILITY ACTIVE
+            <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-mono font-bold">
+              MAX THROUGHPUT
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[10px] text-slate-500 font-semibold block">Drop Idle Protection</span>
-              <span className="text-amber-400 font-bold font-mono text-sm">20 Seconds</span>
-              <p className="text-[10px] text-slate-400">Prevents disconnects during network jitter</p>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
+              <span className="text-[10px] text-slate-500 font-semibold block">RTMP Queue Size</span>
+              <span className="text-amber-400 font-bold font-mono text-xs">16,384 Frames</span>
+              <p className="text-[10px] text-slate-400">Zero frame drops on burst</p>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[10px] text-slate-500 font-semibold block">Stunnel TLS Keepalive</span>
-              <span className="text-emerald-400 font-bold font-mono text-sm">SO_KEEPALIVE=1</span>
-              <p className="text-[10px] text-slate-400">Auto-reconnects YouTube & Twitch RTMPS</p>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
+              <span className="text-[10px] text-slate-500 font-semibold block">Kernel Write Buffer</span>
+              <span className="text-emerald-400 font-bold font-mono text-xs">32MB (tcp_wmem)</span>
+              <p className="text-[10px] text-slate-400">Prioritized for upload</p>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[10px] text-slate-500 font-semibold block">Nginx Message Buffer</span>
-              <span className="text-blue-400 font-bold font-mono text-sm">32MB / Queue 8192</span>
-              <p className="text-[10px] text-slate-400">Zero frame dropping under high bitrates</p>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
+              <span className="text-[10px] text-slate-500 font-semibold block">Stunnel Sockets</span>
+              <span className="text-blue-400 font-bold font-mono text-xs">8MB SNDBUF</span>
+              <p className="text-[10px] text-slate-400">Smooth YouTube/Twitch TLS</p>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-              <span className="text-[10px] text-slate-500 font-semibold block">Socket Buffer Allocation</span>
-              <span className="text-purple-400 font-bold font-mono text-sm">4MB Send/Receive</span>
-              <p className="text-[10px] text-slate-400">Smooth flow for 1080p60 & 4K streams</p>
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
+              <span className="text-[10px] text-slate-500 font-semibold block">BBR Congestion</span>
+              <span className="text-purple-400 font-bold font-mono text-xs">FQ Pacing Active</span>
+              <p className="text-[10px] text-slate-400">Line-rate upload speed</p>
+            </div>
+          </div>
+        </div>
+
+        {/* WireGuard Traffic Compatibility Card */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                <Wifi className="w-4 h-4 text-cyan-400" />
+                <span>WireGuard Compatibility</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">Zero MTU blackholes or tunnel drops</p>
+            </div>
+            <span className="text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-2 py-0.5 rounded font-mono font-bold">
+              WG COMPATIBLE
+            </span>
+          </div>
+
+          <div className="space-y-2 text-xs">
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-300">TCP MTU Probing</span>
+                <span className="text-emerald-400 font-mono font-bold text-[10px]">tcp_mtu_probing=1</span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Automatically adjusts packet sizes to fit WireGuard 1420/1280 MTU tunnels without packet fragmentation.
+              </p>
+            </div>
+
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-300">Tunnel Port &amp; Route Protection</span>
+                <span className="text-cyan-400 font-mono font-bold text-[10px]">UDP 51820 Protected</span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Loose reverse path filtering (<code className="text-cyan-300">rp_filter=2</code>) allows asymmetric WireGuard routing.
+              </p>
             </div>
           </div>
         </div>
@@ -210,9 +254,9 @@ export const SecurityAndValidatorTab: React.FC = () => {
             <div>
               <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <Globe className="w-4 h-4 text-amber-400" />
-                <span>Web Dashboard Access Control</span>
+                <span>Web Dashboard Access</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">Optionally disable web page HTTP access</p>
+              <p className="text-xs text-slate-400 mt-0.5">Disabled by default for security</p>
             </div>
             <span
               className={`text-[10px] px-2.5 py-0.5 rounded font-mono font-bold border ${
@@ -221,7 +265,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
                   : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
               }`}
             >
-              {isWebUiDisabled ? 'WEB PAGE DISABLED' : 'WEB PAGE ACTIVE'}
+              {isWebUiDisabled ? 'DISABLED BY DEFAULT' : 'ENABLED'}
             </span>
           </div>
 
@@ -229,7 +273,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
             <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-200">
-                  {isWebUiDisabled ? 'Web Page Access is Currently Disabled' : 'Web Page Access is Currently Enabled'}
+                  {isWebUiDisabled ? 'Web Access: Disabled (403)' : 'Web Access: Enabled'}
                 </span>
                 <button
                   onClick={handleToggleWebUi}
@@ -252,7 +296,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                When disabled, Nginx returns <code className="text-rose-300 font-mono">403 Forbidden</code> for visitors accessing the web dashboard site. Your RTMP stream ingests, stream validator, and disconnection protection will remain 100% operational.
+                When disabled, public HTTP requests to port 8080 return <code className="text-rose-300 font-mono">403 Forbidden</code>. RTMP stream ingests and protection relays remain 100% active.
               </p>
 
               {webUiMsg && (
@@ -263,7 +307,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
             </div>
 
             <p className="text-[10px] text-slate-500 font-mono">
-              Note: You can also toggle this via <code className="text-amber-400">./install.sh</code> menu option 10 on your host VPS or by setting <code className="text-amber-400">DISABLE_WEB_UI=true</code>.
+              Toggle via <code className="text-amber-400">./install.sh</code> menu option 6, API, or <code className="text-amber-400">DISABLE_WEB_UI=true</code>.
             </p>
           </div>
         </div>

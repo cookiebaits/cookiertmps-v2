@@ -17,6 +17,7 @@ export default defineConfig({
       configureServer(server) {
         let episodeCount = 1;
         let activePushers: string[] = [];
+        let webUiDisabled = true;
         const mockObsKey = 'cookiepass';
         const isAuthorized = (req: { headers: Record<string, string | string[] | undefined> }) =>
           req.headers['x-stream-key'] === mockObsKey;
@@ -401,7 +402,7 @@ export default defineConfig({
 
           if (url.startsWith('/api/web_ui/status')) {
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ disabled: false }));
+            res.end(JSON.stringify({ disabled: webUiDisabled }));
             return;
           }
 
@@ -412,9 +413,9 @@ export default defineConfig({
               req.on('end', () => {
                 try {
                   const data = JSON.parse(body || '{}');
-                  const nextState = typeof data.disabled === 'boolean' ? data.disabled : true;
+                  webUiDisabled = typeof data.disabled === 'boolean' ? data.disabled : !webUiDisabled;
                   res.setHeader('Content-Type', 'application/json');
-                  res.end(JSON.stringify({ success: true, disabled: nextState }));
+                  res.end(JSON.stringify({ success: true, disabled: webUiDisabled }));
                 } catch {
                   res.statusCode = 400;
                   res.setHeader('Content-Type', 'application/json');
@@ -423,7 +424,7 @@ export default defineConfig({
               });
             } else {
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ disabled: false }));
+              res.end(JSON.stringify({ disabled: webUiDisabled }));
             }
             return;
           }

@@ -2,6 +2,14 @@
 set -e
 
 export SERVER_DOMAIN="${SERVER_DOMAIN:-localhost}"
+export PORT_HTTP="${PORT_HTTP:-8080}"
+export PORT_HTTPS="${PORT_HTTPS:-8443}"
+export DISABLE_WEB_UI="${DISABLE_WEB_UI:-true}"
+
+mkdir -p /app/data
+if [ "$DISABLE_WEB_UI" = "true" ]; then
+    touch /app/data/disable_web_ui.flag
+fi
 
 NGINX_TEMPLATE=/etc/nginx/nginx.conf.template
 NGINX_CONF=/etc/nginx/nginx.conf

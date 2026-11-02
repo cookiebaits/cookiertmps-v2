@@ -424,7 +424,7 @@ def protection_status():
 
 DISABLE_WEB_UI_FLAG = '/app/data/disable_web_ui.flag'
 
-if os.getenv('DISABLE_WEB_UI', 'false').lower() == 'true':
+if os.getenv('DISABLE_WEB_UI', 'true').lower() == 'true':
     try:
         os.makedirs('/app/data', exist_ok=True)
         open(DISABLE_WEB_UI_FLAG, 'a').close()
