@@ -164,19 +164,31 @@ fi
 
 echo "Starting Stunnel..."
 mkdir -p /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel/conf.d
-(id -u stunnel4 >/dev/null 2>&1 || useradd -r -s /bin/false stunnel4) 2>/dev/null || true
-touch /var/log/stunnel4/stunnel.log 2>/dev/null || true
-chown -R stunnel4:stunnel4 /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel 2>/dev/null || true
-chmod 775 /var/run/stunnel4 /var/log/stunnel4 2>/dev/null || true
-chmod 664 /var/log/stunnel4/stunnel.log 2>/dev/null || true
+touch /var/log/stunnel4/stunnel.log /tmp/stunnel.log /tmp/stunnel.pid 2>/dev/null || true
+chmod 777 /var/run/stunnel4 /var/log/stunnel4 /tmp 2>/dev/null || true
+chmod 666 /var/log/stunnel4/stunnel.log /tmp/stunnel.log /tmp/stunnel.pid 2>/dev/null || true
 chmod -R 755 /etc/stunnel 2>/dev/null || true
-# Start stunnel in the background
+
+STUNNEL_CMD=""
 if command -v stunnel4 >/dev/null 2>&1; then
-    stunnel4 /etc/stunnel/stunnel.conf 2>&1 || { echo "Stunnel4 startup warning, log:"; cat /var/log/stunnel4/stunnel.log 2>/dev/null || true; }
+    STUNNEL_CMD="stunnel4"
 elif command -v stunnel >/dev/null 2>&1; then
-    stunnel /etc/stunnel/stunnel.conf 2>&1 || { echo "Stunnel startup warning, log:"; cat /var/log/stunnel4/stunnel.log 2>/dev/null || true; }
+    STUNNEL_CMD="stunnel"
+fi
+
+if [ -n "$STUNNEL_CMD" ]; then
+    echo "Starting $STUNNEL_CMD with /etc/stunnel/stunnel.conf..."
+    $STUNNEL_CMD /etc/stunnel/stunnel.conf 2>&1 || true
+    sleep 0.5
+    if ! pgrep -f stunnel >/dev/null 2>&1; then
+        echo "Stunnel warning: process not detected after launch. Checking logs:"
+        cat /tmp/stunnel.log 2>/dev/null || true
+        cat /var/log/stunnel4/stunnel.log 2>/dev/null || true
+    else
+        echo "Stunnel is running successfully."
+    fi
 else
-    echo "Warning: Stunnel binary not found."
+    echo "Warning: Stunnel binary not found in container."
 fi
 
 # --- SSL Initialization (Dummy Certificates) ---

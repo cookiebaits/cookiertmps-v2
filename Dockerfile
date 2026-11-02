@@ -22,6 +22,7 @@ RUN echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99fast && \
     echo 'Acquire::GzipIndexes "true";' >> /etc/apt/apt.conf.d/99fast && \
     apt-get update -o Acquire::IndexTargets::deb::Translations=none && \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
         stunnel4 \
         gettext \
         ffmpeg \

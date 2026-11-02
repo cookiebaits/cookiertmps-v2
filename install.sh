@@ -1502,6 +1502,9 @@ build_and_run() {
         return
     fi
 
+    echo -e "${YELLOW}Deep Dive: Unbinding old ports, stopping leftover containers, and cleaning temporary files...${NC}"
+    deep_cleanup_ports_and_processes
+
     mkdir -p ./data/letsencrypt
 
     echo -e "${GREEN}Building Web Dashboard static assets...${NC}"
@@ -1514,9 +1517,10 @@ build_and_run() {
     echo -e "${GREEN}Building Docker Image...${NC}"
     docker build -t cookie-rtmps .
 
-    echo -e "${GREEN}Stopping any existing container...${NC}"
+    echo -e "${YELLOW}Stopping any existing container and verifying port freedom...${NC}"
     docker stop cookie-rtmps 2>/dev/null || true
-    docker rm cookie-rtmps 2>/dev/null || true
+    docker rm -v -f cookie-rtmps 2>/dev/null || true
+    deep_cleanup_ports_and_processes
 
     echo -e "${GREEN}Starting container...${NC}"
 
@@ -1708,32 +1712,30 @@ view_logs() {
 }
 
 deep_cleanup_ports_and_processes() {
-    echo -e "${YELLOW}Cleaning up host processes and unbinding ports (1935, 8081, 8443, 19350-19359; port 80 preserved)...${NC}"
+    echo -e "${YELLOW}Cleaning up host processes and unbinding ports (1935, 8081, 8443, 8880, 19349-19359; ports 80/443 & WireGuard preserved)...${NC}"
     if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
         SUDO="sudo"
     else
         SUDO=""
     fi
 
-    # NOTE: Ports 80 and 443 are strictly preserved and never stopped, killed, or unbound.
-    # WireGuard tunnels (UDP 51820/51821) and host webservers are never touched.
-
-    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_STATS" 8081 1935 8443 8880 8080 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359)
+    # NOTE: Ports 80, 443, 22 (SSH), and WireGuard tunnels (UDP 51820/51821) are strictly preserved and never stopped, killed, or unbound.
+    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_HTTPS" "$PORT_STATS" 1935 8443 8880 8081 1937 9997 8082 19349 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359 8080 8000 8088 2052 2082)
     local PORTS=()
     for p in "${CANDIDATE_PORTS[@]}"; do
-        # Do not include port 80, 443, 51820, 51821 under any circumstances
-        if [ "$p" != "80" ] && [ "$p" != "443" ] && [ "$p" != "51820" ] && [ "$p" != "51821" ] && [ -n "$p" ]; then
+        # Do not include port 80, 443, 22, 51820, 51821 under any circumstances
+        if [ "$p" != "80" ] && [ "$p" != "443" ] && [ "$p" != "22" ] && [ "$p" != "51820" ] && [ "$p" != "51821" ] && [ -n "$p" ]; then
             PORTS+=("$p")
         fi
     done
 
-    # Find and stop any docker containers publishing application ports (excluding port 80, 443, 51820)
+    # Find and stop any docker containers publishing application ports (excluding sensitive ports)
     if command -v docker &> /dev/null; then
         for port in "${PORTS[@]}"; do
             local cids
-            cids=$(docker ps -q --filter "publish=$port" 2>/dev/null || true)
+            cids=$(docker ps -a -q --filter "publish=$port" 2>/dev/null || true)
             if [ -n "$cids" ]; then
-                docker stop $cids 2>/dev/null || true
+                docker stop -t 2 $cids 2>/dev/null || true
                 docker rm -v -f $cids 2>/dev/null || true
             fi
         done
@@ -1743,10 +1745,11 @@ deep_cleanup_ports_and_processes() {
     local PROTECTED_PIDS=" $$ $PPID "
     if command -v pgrep &> /dev/null; then
         local found_ssh
-        found_ssh=$(pgrep -d' ' -E '(sshd|ssh)' 2>/dev/null || true)
+        found_ssh=$(pgrep -d' ' '(sshd|ssh)' 2>/dev/null || pgrep -d' ' 'ssh' 2>/dev/null || true)
         PROTECTED_PIDS="${PROTECTED_PIDS} ${found_ssh} "
     fi
 
+    # Unbind ports via lsof and fuser
     for port in "${PORTS[@]}"; do
         if command -v lsof &> /dev/null; then
             local pids
@@ -1788,7 +1791,10 @@ deep_cleanup_ports_and_processes() {
     $SUDO pkill -f "stream_validator" 2>/dev/null || true
     $SUDO pkill -f "gunicorn" 2>/dev/null || true
     $SUDO pkill -f "stunnel" 2>/dev/null || true
-    # Note: Host nginx is intentionally NOT killed to avoid affecting port 80 web services
+    $SUDO pkill -f "stunnel4" 2>/dev/null || true
+
+    # Clean up stale temporary status, lock, and log files in /tmp
+    rm -f /tmp/stunnel* /tmp/stream_* /tmp/validator.log /tmp/mediamtx* 2>/dev/null || true
 }
 
 stop_and_uninstall() {
@@ -1797,56 +1803,67 @@ stop_and_uninstall() {
         sleep 2
         return
     fi
-    echo -e "${YELLOW}Stopping services, unbinding all ports, and performing complete removal...${NC}"
-    OLD_CONTAINERS=$(docker ps -a --format '{{.ID}} {{.Names}}' | grep -iE 'rtmp|cookie|prism' | awk '{print $1}')
-    if [ ! -z "$OLD_CONTAINERS" ]; then
-        docker stop $OLD_CONTAINERS 2>/dev/null && echo -e "${GREEN}Containers stopped.${NC}" || true
-        docker rm -v -f $OLD_CONTAINERS 2>/dev/null && echo -e "${GREEN}Containers and volumes removed.${NC}" || true
+    echo -e "${YELLOW}========================================================================${NC}"
+    echo -e "${YELLOW}       Extra Deep Dive: Complete Removal, Ports & Container Purge       ${NC}"
+    echo -e "${YELLOW}========================================================================${NC}"
+    echo -e "${YELLOW}Searching for any running, restarting, dead, or stuck containers...${NC}"
+
+    # 1. Extra Deep Dive: Query all containers regardless of state
+    local STUCK_CONTAINERS
+    STUCK_CONTAINERS=$(docker ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -iE 'cookie|rtmp|prism|mediamtx|stream_validator' | awk '{print $1}' || true)
+    if [ -n "$STUCK_CONTAINERS" ]; then
+        echo -e "${YELLOW}Force terminating matching/stuck containers: ${STUCK_CONTAINERS}...${NC}"
+        docker stop -t 2 $STUCK_CONTAINERS 2>/dev/null || true
+        docker rm -f -v $STUCK_CONTAINERS 2>/dev/null || true
+        echo -e "${GREEN}Stuck and matching containers removed.${NC}"
     else
-        docker stop cookie-rtmps 2>/dev/null && echo -e "${GREEN}Container stopped.${NC}" || echo -e "${RED}Container not running.${NC}"
-        docker rm -v -f cookie-rtmps 2>/dev/null && echo -e "${GREEN}Container and volumes removed.${NC}" || true
+        echo -e "${GREEN}No matching stuck containers detected.${NC}"
     fi
 
-    echo -e "${YELLOW}Unbinding all ports and killing associated processes...${NC}"
+    # 2. Deep unbinding of all streaming ports & host helper processes
+    echo -e "${YELLOW}Performing deep-dive unbinding of streaming ports (preserving ports 80, 443, WireGuard & SSH)...${NC}"
     deep_cleanup_ports_and_processes
 
-    OLD_VOLUMES=$(docker volume ls -q | grep -iE 'rtmp|cookie|prism' || true)
-    if [ ! -z "$OLD_VOLUMES" ]; then
-        docker volume rm -f $OLD_VOLUMES 2>/dev/null && echo -e "${GREEN}Matching Docker volumes removed.${NC}" || true
+    # 3. Docker system and volume purge
+    echo -e "${YELLOW}Purging associated Docker volumes, networks, build caches, and images...${NC}"
+    OLD_VOLUMES=$(docker volume ls -q | grep -iE 'rtmp|cookie|prism' 2>/dev/null || true)
+    if [ -n "$OLD_VOLUMES" ]; then
+        docker volume rm -f $OLD_VOLUMES 2>/dev/null || true
+        echo -e "${GREEN}Matching Docker volumes removed.${NC}"
     fi
 
-    OLD_IMAGES=$(docker images --format '{{.ID}} {{.Repository}}' | grep -iE 'rtmp|cookie|prism' | awk '{print $1}')
-    if [ ! -z "$OLD_IMAGES" ]; then
-        docker rmi -f $OLD_IMAGES 2>/dev/null && echo -e "${GREEN}Images removed.${NC}" || true
+    OLD_IMAGES=$(docker images --format '{{.ID}} {{.Repository}}' 2>/dev/null | grep -iE 'rtmp|cookie|prism' | awk '{print $1}' || true)
+    if [ -n "$OLD_IMAGES" ]; then
+        docker rmi -f $OLD_IMAGES 2>/dev/null || true
+        echo -e "${GREEN}Matching Docker images removed.${NC}"
     else
-        docker rmi -f cookie-rtmps 2>/dev/null && echo -e "${GREEN}Image removed.${NC}" || true
+        docker rmi -f cookie-rtmps 2>/dev/null || true
     fi
 
-    echo -e "${YELLOW}Pruning Docker build cache, volumes, networks, and unused images...${NC}"
     docker volume prune -f 2>/dev/null || true
     docker network prune -f 2>/dev/null || true
     docker image prune -a -f 2>/dev/null || true
     docker builder prune -a -f 2>/dev/null || true
     docker system prune -a -f 2>/dev/null || true
 
-    echo -e "${YELLOW}Removing local configuration files, build assets, and hosted web pages...${NC}"
-    rm -f rtmp_config.env
+    # 4. Remove all configuration files, runtime data, and hosted frontend files
+    echo -e "${YELLOW}Purging configuration files, state data, build assets, and web cache...${NC}"
+    rm -f rtmp_config.env rtmp_config.env.bak
     rm -rf ./data
-    rm -rf ./dist
-    rm -rf ./dist-ssr
-    rm -rf ./.vite
+    rm -rf ./dist ./dist-ssr ./.vite
+    rm -rf node_modules/.vite node_modules/.cache 2>/dev/null || true
+    rm -f /tmp/stunnel* /tmp/stream_* /tmp/validator.log /tmp/mediamtx* 2>/dev/null || true
 
-    # Clean up any static web assets hosted on local webroot directories
+    # Clean up static web assets on local webroots
     if [ -d "/usr/local/nginx/html" ]; then
         sudo rm -rf /usr/local/nginx/html/* 2>/dev/null || rm -rf /usr/local/nginx/html/* 2>/dev/null || true
     fi
     if [ -d "/var/www/html" ]; then
-        sudo rm -rf /var/www/html/* 2>/dev/null || rm -rf /var/www/html/* 2>/dev/null || true
+        sudo rm -f /var/www/html/chat.html /var/www/html/index.html 2>/dev/null || rm -f /var/www/html/chat.html /var/www/html/index.html 2>/dev/null || true
     fi
 
-    echo -e "${GREEN}Local configuration, compiled web pages, and hosted files removed successfully.${NC}"
-
-    echo -e "${GREEN}CookieRTMPS, hosted web pages, and all cached components have been completely uninstalled and all streaming ports unbound (port 80 preserved).${NC}"
+    echo -e "${GREEN}Extra deep dive complete: All streaming ports unbound, stuck containers killed, and files removed.${NC}"
+    echo -e "${GREEN}(Ports 80, 443, 22/SSH, and WireGuard tunnels strictly preserved).${NC}"
     sleep 3
 }
 

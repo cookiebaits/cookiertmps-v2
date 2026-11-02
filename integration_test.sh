@@ -44,14 +44,48 @@ check_process "nginx"
 check_process "gunicorn"
 
 echo -n "Checking process 'stunnel' inside container... "
+STUNNEL_DETECTED=0
 if docker exec $CONTAINER_NAME pgrep -x stunnel > /dev/null 2>&1 || \
    docker exec $CONTAINER_NAME pgrep -x stunnel4 > /dev/null 2>&1 || \
-   docker exec $CONTAINER_NAME pgrep -f stunnel > /dev/null 2>&1; then
+   docker exec $CONTAINER_NAME pgrep -f stunnel > /dev/null 2>&1 || \
+   docker exec $CONTAINER_NAME pidof stunnel > /dev/null 2>&1 || \
+   docker exec $CONTAINER_NAME pidof stunnel4 > /dev/null 2>&1; then
+    STUNNEL_DETECTED=1
+fi
+
+if [ "$STUNNEL_DETECTED" -eq 1 ]; then
     echo -e "[${GREEN}PASSED${NC}]"
 else
     echo -e "[${RED}FAILED${NC}]"
-    echo -e "${YELLOW}Container Stunnel logs (/var/log/stunnel4/stunnel.log):${NC}"
-    docker exec $CONTAINER_NAME cat /var/log/stunnel4/stunnel.log 2>/dev/null || true
+    echo -e "\n${RED}==================== STUNNEL PRIMARY ERROR DIAGNOSIS ====================${NC}"
+    
+    # 1. Fetch container log files
+    TMP_LOG=$(docker exec $CONTAINER_NAME cat /tmp/stunnel.log 2>/dev/null || true)
+    VAR_LOG=$(docker exec $CONTAINER_NAME cat /var/log/stunnel4/stunnel.log 2>/dev/null || true)
+    
+    # 2. Execute dry run in container to get real-time stderr
+    DRY_RUN=$(docker exec $CONTAINER_NAME sh -c 'stunnel4 /etc/stunnel/stunnel.conf 2>&1 || stunnel /etc/stunnel/stunnel.conf 2>&1' || true)
+
+    COMBINED_LOGS="${TMP_LOG}
+${VAR_LOG}
+${DRY_RUN}"
+
+    # 3. Define primary error
+    PRIMARY_ERR=$(echo "$COMBINED_LOGS" | grep -iE 'error|fatal|cannot|failed|denied|no such|refused|critical|invalid' | head -n 3)
+    if [ -n "$PRIMARY_ERR" ]; then
+        echo -e "${YELLOW}Primary Error Defined:${NC}"
+        echo -e "${RED}${PRIMARY_ERR}${NC}"
+    else
+        echo -e "${YELLOW}Primary Error Defined:${NC} Stunnel daemon exited immediately (process terminated without unhandled fatal crash)."
+    fi
+
+    echo -e "\n${YELLOW}Detailed Container Stunnel Log Output:${NC}"
+    if [ -n "$COMBINED_LOGS" ]; then
+        echo "$COMBINED_LOGS" | tail -n 25
+    else
+        echo "No stunnel log entries recorded in container."
+    fi
+    echo -e "${RED}========================================================================${NC}\n"
 fi
 
 # 3. Check Flask Health Endpoint
