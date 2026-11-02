@@ -413,13 +413,23 @@ def episode():
 def protection_status():
     if not is_authorized():
         return unauthorized()
+    prep = None
+    try:
+        prep_path = os.getenv('PROTECTION_PREP_STATUS_FILE', '/tmp/stream_prep_status.json')
+        if os.path.exists(prep_path):
+            with open(prep_path) as pf:
+                prep = json.load(pf)
+    except Exception:
+        pass
+
     try:
         with open(os.getenv('PROTECTION_STATUS_FILE', '/tmp/stream_protection.json')) as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return json_response({'running': False})
+        return json_response({'running': False, 'prep': prep})
     data['running'] = True
     data['videoUrl'] = os.getenv('BRB_VIDEO_URL', '')
+    data['prep'] = prep
     return json_response(data)
 
 DISABLE_WEB_UI_FLAG = '/app/data/disable_web_ui.flag'

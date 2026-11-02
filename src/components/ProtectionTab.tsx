@@ -11,6 +11,13 @@ interface ChannelStatus {
   lastEvent: string;
 }
 
+interface PrepStatus {
+  percent: number;
+  stage: string;
+  detail?: string;
+  ready: boolean;
+}
+
 interface ProtectionStatus {
   running: boolean;
   enabled?: boolean;
@@ -20,6 +27,7 @@ interface ProtectionStatus {
   videoUrl?: string;
   updatedAt?: number;
   channels?: Record<string, ChannelStatus>;
+  prep?: PrepStatus | null;
 }
 
 const DEFAULT_VIDEO = 'Default backup video';
@@ -159,10 +167,27 @@ export const ProtectionTab: React.FC = () => {
         </div>
       )}
 
-      {status && !status.running && !error && (
-        <div className="flex items-start space-x-2 bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-xl px-4 py-3 text-xs">
-          <Clock className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>The server is still getting the backup video ready. This takes a few minutes the first time it starts.</span>
+      {status && (!status.running || (status.prep && !status.prep.ready)) && !error && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-amber-300 font-semibold text-xs">
+              <Clock className="w-4 h-4 animate-spin shrink-0" />
+              <span>MediaMTX Disconnection Protection Preparation</span>
+            </div>
+            <span className="text-xs font-mono font-bold text-amber-300">
+              {status.prep?.percent ?? 50}%
+            </span>
+          </div>
+          <div className="h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+            <div
+              className="h-full bg-gradient-to-r from-amber-500 to-amber-300 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(5, status.prep?.percent ?? 25))}%` }}
+            />
+          </div>
+          <p className="text-xs text-amber-200/80">
+            {status.prep?.stage || 'Preparing backup video and initializing MediaMTX failover daemon...'}
+            {status.prep?.detail ? ` (${status.prep.detail})` : ''}
+          </p>
         </div>
       )}
 

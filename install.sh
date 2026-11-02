@@ -909,7 +909,11 @@ configure_domain() {
             if [[ "$dom_input" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
                 SERVER_DOMAIN="$dom_input"
                 CLOUDFLARE_PROXY="true"
+                build_site_urls
                 echo -e "${GREEN}Domain set to: $SERVER_DOMAIN${NC}"
+                echo -e "${GREEN}Ingest endpoints updated immediately:${NC}"
+                echo -e "  RTMP Ingest:     rtmp://${INGEST_HOST}:${PORT_RTMP}/${APP_NAME}"
+                echo -e "  Vertical Ingest: rtmp://${INGEST_HOST}:${PORT_RTMP}/vertical"
             else
                 echo -e "${RED}That is not a valid domain. Keeping current setting.${NC}"
             fi
@@ -917,7 +921,11 @@ configure_domain() {
         2)
             SERVER_DOMAIN=""
             CLOUDFLARE_PROXY="false"
+            build_site_urls
             echo -e "${GREEN}The settings website will use the VPS IP: http://${SERVER_IP}:${PORT_HTTP}/${NC}"
+            echo -e "${GREEN}Ingest endpoints updated to VPS IP:${NC}"
+            echo -e "  RTMP Ingest:     rtmp://${INGEST_HOST}:${PORT_RTMP}/${APP_NAME}"
+            echo -e "  Vertical Ingest: rtmp://${INGEST_HOST}:${PORT_RTMP}/vertical"
             ;;
         3)
             echo ""
@@ -1594,8 +1602,8 @@ build_and_run() {
     if [ $? -eq 0 ]; then
         build_site_urls
         echo -e "${GREEN}Container 'cookie-rtmps' is running!${NC}"
-        echo -e "You can stream to: rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}"
-        echo -e "Vertical stream:  rtmp://${SERVER_IP}:${PORT_RTMP}/vertical"
+        echo -e "You can stream to: rtmp://${INGEST_HOST}:${PORT_RTMP}/${APP_NAME}"
+        echo -e "Vertical stream:  rtmp://${INGEST_HOST}:${PORT_RTMP}/vertical"
         echo -e "Settings website: ${DASHBOARD_URL}  (password: your stream key)"
         if [ "$NOALBS_ENABLED" == "true" ]; then
             echo -e "${YELLOW}Disconnection protection is ON. On first start the backup video is downloaded and formatted;${NC}"
@@ -1850,10 +1858,13 @@ build_site_urls() {
     local base
     if [ -n "$SERVER_DOMAIN" ]; then
         base="https://${SERVER_DOMAIN}"
+        INGEST_HOST="${SERVER_DOMAIN}"
     elif [ "$PORT_HTTP" != "80" ]; then
         base="http://${SERVER_IP}:${PORT_HTTP}"
+        INGEST_HOST="${SERVER_IP}"
     else
         base="http://${SERVER_IP}"
+        INGEST_HOST="${SERVER_IP}"
     fi
     DASHBOARD_URL="${base}/"
     CHAT_CONFIG_URL="${base}/${CHAT_HEX_KEY}"
@@ -1867,8 +1878,8 @@ while true; do
     echo -e "${GREEN}     CookieRTMPS Quick Installer      ${NC}"
     echo -e "${GREEN}=====================================${NC}"
     echo -e "${YELLOW}Quick Reference:${NC}"
-    echo -e "  RTMP Ingest:     rtmp://${SERVER_IP}:${PORT_RTMP}/${APP_NAME}"
-    echo -e "  Vertical Ingest: rtmp://${SERVER_IP}:${PORT_RTMP}/vertical"
+    echo -e "  RTMP Ingest:     rtmp://${INGEST_HOST}:${PORT_RTMP}/${APP_NAME}"
+    echo -e "  Vertical Ingest: rtmp://${INGEST_HOST}:${PORT_RTMP}/vertical"
     echo -e "  Combined Chat Config Page: ${CHAT_CONFIG_URL}"
     echo -e "  Web Dashboard:   ${DASHBOARD_URL}  (password: stream key)"
     echo "-------------------------------------"

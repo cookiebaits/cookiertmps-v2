@@ -44,10 +44,14 @@ check_process "nginx"
 check_process "gunicorn"
 
 echo -n "Checking process 'stunnel' inside container... "
-if docker exec $CONTAINER_NAME pgrep -E '^(stunnel|stunnel4)$' > /dev/null 2>&1; then
+if docker exec $CONTAINER_NAME pgrep -x stunnel > /dev/null 2>&1 || \
+   docker exec $CONTAINER_NAME pgrep -x stunnel4 > /dev/null 2>&1 || \
+   docker exec $CONTAINER_NAME pgrep -f stunnel > /dev/null 2>&1; then
     echo -e "[${GREEN}PASSED${NC}]"
 else
     echo -e "[${RED}FAILED${NC}]"
+    echo -e "${YELLOW}Container Stunnel logs (/var/log/stunnel4/stunnel.log):${NC}"
+    docker exec $CONTAINER_NAME cat /var/log/stunnel4/stunnel.log 2>/dev/null || true
 fi
 
 # 3. Check Flask Health Endpoint
@@ -68,18 +72,50 @@ fi
 
 NOALBS_ENABLED=$(docker exec $CONTAINER_NAME printenv NOALBS_ENABLED 2>/dev/null || echo "false")
 if [ "$NOALBS_ENABLED" == "true" ]; then
-    echo -n "Checking backup video server (MediaMTX, may need a moment on first start)... "
+    echo -e "Checking backup video server (MediaMTX Disconnection Protection)..."
     READY=0
-    for i in $(seq 1 30); do
+    BAR_WIDTH=32
+    for i in $(seq 1 45); do
         if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1:9997/v3/paths/list > /dev/null 2>&1; then
-            READY=1; break
+            READY=1
+            BAR_STR=$(printf "%${BAR_WIDTH}s" | tr ' ' '=')
+            printf "\r  [${GREEN}%s${NC}] 100%% [MediaMTX Active & Ready] [${GREEN}PASSED${NC}]\n" "$BAR_STR"
+            break
         fi
-        sleep 2
+
+        PREP_STATUS=$(docker exec $CONTAINER_NAME cat /tmp/stream_prep_status.json 2>/dev/null || true)
+        PERCENT=0
+        STAGE="Initializing MediaMTX..."
+        if [ -n "$PREP_STATUS" ]; then
+            PERCENT=$(echo "$PREP_STATUS" | grep -oP '(?<="percent":\s?)\d+' 2>/dev/null || echo "0")
+            STAGE=$(echo "$PREP_STATUS" | grep -oP '(?<="stage":\s?")[^"]+' 2>/dev/null || echo "Preparing backup video...")
+        fi
+
+        PERCENT=${PERCENT:-0}
+        if [ "$PERCENT" -le 0 ]; then
+            PERCENT=$(( (i * 90) / 45 ))
+            if [ "$PERCENT" -gt 90 ]; then PERCENT=90; fi
+        fi
+
+        FILLED=$(( (PERCENT * BAR_WIDTH) / 100 ))
+        EMPTY=$(( BAR_WIDTH - FILLED ))
+
+        BAR_STR=""
+        if [ $FILLED -gt 0 ]; then
+            BAR_STR=$(printf "%${FILLED}s" | tr ' ' '=')
+        fi
+        EMPTY_STR=""
+        if [ $EMPTY -gt 0 ]; then
+            EMPTY_STR=$(printf "%${EMPTY}s" | tr ' ' ' ')
+        fi
+
+        printf "\r  [${YELLOW}%s${NC}%s] %3d%% [${CYAN}%-32s${NC}]" "$BAR_STR" "$EMPTY_STR" "$PERCENT" "${STAGE:0:32}"
+        sleep 1
     done
-    if [ "$READY" == "1" ]; then
-        echo -e "[${GREEN}PASSED${NC}]"
-    else
-        echo -e "[${YELLOW}STILL PREPARING / FAILED${NC}]"
+
+    if [ "$READY" -ne 1 ]; then
+        printf "\n"
+        echo -e "[${YELLOW}STILL PREPARING / TIMED OUT${NC}]"
         docker exec $CONTAINER_NAME tail -20 /tmp/stream_protection.log 2>/dev/null || true
     fi
 else

@@ -84,7 +84,11 @@ RUN mkdir -p /etc/stunnel/conf.d /var/run/stunnel4 /var/log/stunnel4 && \
 COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
 COPY stunnel/stunnel4 /etc/default/stunnel4
 COPY stunnel/*.conf /etc/stunnel/conf.d/
-RUN rm -f /etc/stunnel/conf.d/stunnel.conf
+RUN rm -f /etc/stunnel/conf.d/stunnel.conf && \
+    chmod -R 755 /etc/stunnel && \
+    touch /var/log/stunnel4/stunnel.log && \
+    chown -R stunnel4:stunnel4 /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel && \
+    chmod 664 /var/log/stunnel4/stunnel.log
 
 # 4. Copy static web assets from builder
 COPY --from=frontend-builder /app/dist/ /usr/local/nginx/html/

@@ -29,6 +29,7 @@ log = logging.getLogger("Protection")
 
 DATA_DIR = os.getenv("PROTECTION_DATA_DIR", "/app/data")
 STATUS_FILE = os.getenv("PROTECTION_STATUS_FILE", "/tmp/stream_protection.json")
+PREP_STATUS_FILE = os.getenv("PROTECTION_PREP_STATUS_FILE", "/tmp/stream_prep_status.json")
 NGINX_STAT = os.getenv("PROTECTION_NGINX_STAT", "http://127.0.0.1:8081/stat")
 NGINX_CONTROL = os.getenv("PROTECTION_NGINX_CONTROL", "http://127.0.0.1:8081/control")
 NGINX_RTMP = os.getenv("PROTECTION_NGINX_RTMP", "rtmp://127.0.0.1:19359")
@@ -37,6 +38,22 @@ MTX_CONFIG = os.getenv("MEDIAMTX_CONFIG", "/etc/mediamtx.yml")
 MTX_RTMP_PORT = int(os.getenv("MEDIAMTX_RTMP_PORT", "1937"))
 MTX_API_PORT = int(os.getenv("MEDIAMTX_API_PORT", "9997"))
 DEFAULT_VIDEO_URL = "https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
+
+def update_prep_status(percent, stage, detail=""):
+    try:
+        data = {
+            "percent": int(percent),
+            "stage": stage,
+            "detail": detail,
+            "updatedAt": int(time.time()),
+            "ready": percent >= 100
+        }
+        tmp = PREP_STATUS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, PREP_STATUS_FILE)
+    except Exception as e:
+        log.debug(f"Failed to write prep status: {e}")
 
 LOW_GRACE_SECONDS = 5
 RESTORE_GRACE_SECONDS = 3
@@ -84,6 +101,7 @@ def probe_has_stream(path, kind):
 
 
 def ensure_source_video(url):
+    update_prep_status(10, "Verifying backup video source", url)
     source = os.path.join(DATA_DIR, "brb_source.mp4")
     url_file = os.path.join(DATA_DIR, "brb_source.url")
     legacy = os.path.join(DATA_DIR, "brb_video.mp4")
@@ -96,8 +114,10 @@ def ensure_source_video(url):
 
     saved_url = open(url_file).read().strip() if os.path.isfile(url_file) else ""
     if is_valid_file(source) and saved_url == url:
+        update_prep_status(30, "Backup video cached and ready", source)
         return source
 
+    update_prep_status(20, "Downloading backup video...", url)
     log.info(f"Downloading backup video from {url}")
     tmp = source + ".download"
     try:
@@ -113,6 +133,7 @@ def ensure_source_video(url):
         os.replace(tmp, source)
         with open(url_file, "w") as f:
             f.write(url)
+        update_prep_status(35, "Backup video downloaded", source)
         log.info("Backup video downloaded.")
     except Exception as e:
         log.error(f"Backup video download failed: {e}")
@@ -166,8 +187,13 @@ def build_output_video(source, orientation):
 def prepare_videos(settings):
     source = ensure_source_video(settings.video_url)
     videos = {}
-    for o in OUTPUTS:
+    outputs_list = list(OUTPUTS.keys())
+    for idx, o in enumerate(outputs_list):
+        pct = 40 + int((idx / max(1, len(outputs_list))) * 45)
+        update_prep_status(pct, f"Formatting {o} backup video...", f"{OUTPUTS[o]['size'][0]}x{OUTPUTS[o]['size'][1]} 60fps")
         videos[o] = (source and build_output_video(source, o)) or build_output_video(None, o)
+        update_prep_status(pct + 20, f"{o.capitalize()} backup video ready", f"Formatted {o}")
+    update_prep_status(88, "Backup video files prepared", "Configuring MediaMTX")
     return videos
 
 
@@ -443,9 +469,13 @@ def main():
 
     mtx = None
     if settings.enabled:
-        write_mediamtx_config(prepare_videos(settings))
+        videos = prepare_videos(settings)
+        update_prep_status(92, "Writing MediaMTX configuration", MTX_CONFIG)
+        write_mediamtx_config(videos)
+        update_prep_status(96, "Starting MediaMTX video streamer", f"Port {MTX_RTMP_PORT}")
         mtx = MediaMTX()
         mtx.ensure_running()
+        update_prep_status(100, "MediaMTX Active & Ready", "Disconnection failover ready")
 
     channels = [Channel(o, settings.ingest_apps[o], settings, settings.enabled) for o in OUTPUTS]
     stop = threading.Event()
