@@ -251,7 +251,7 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p>© 2026 CookieRTMPS Control Center — Hardened Nginx 1.30.3 & Local RTMP Module</p>
           <div className="flex items-center space-x-4 text-[11px] font-mono text-slate-400">
-            <span>Ports: 1935 (RTMP/RTMPS) / 80 (HTTP) / 443 (HTTPS)</span>
+            <span>Ports: 1935 (RTMP/RTMPS) / 8880 (HTTP) / 8443 (HTTPS)</span>
             <span>AMF Recursion: 128</span>
           </div>
         </div>

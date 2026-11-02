@@ -149,7 +149,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
             <span>Upload Speed Prioritization, WireGuard Tuning & Access Control</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Running on non-privileged alternative ports (8080 HTTP & 8443 HTTPS). Zero use of ports 80/443. Web Dashboard disabled by default.
+            Running on non-privileged alternative ports (8880 HTTP & 8443 HTTPS). Zero use of ports 80/443 or conflict-prone 8080. Web Dashboard disabled by default.
           </p>
         </div>
 
@@ -160,7 +160,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
           </div>
           <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
             <Lock className="w-4 h-4 text-emerald-400" />
-            <span className="font-mono text-slate-300">Ports 8080/8443 Active (No 80/443)</span>
+            <span className="font-mono text-slate-300">Ports 8880/8443 Active (No 80/443/8080)</span>
           </div>
         </div>
       </div>
@@ -296,7 +296,7 @@ export const SecurityAndValidatorTab: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                When disabled, public HTTP requests to port 8080 return <code className="text-rose-300 font-mono">403 Forbidden</code>. RTMP stream ingests and protection relays remain 100% active.
+                When disabled, public HTTP requests to port 8880 return <code className="text-rose-300 font-mono">403 Forbidden</code>. RTMP stream ingests and protection relays remain 100% active.
               </p>
 
               {webUiMsg && (
@@ -312,6 +312,81 @@ export const SecurityAndValidatorTab: React.FC = () => {
           </div>
         </div>
 
+      </div>
+
+      {/* Alternative Ports & Cloudflare Compatibility Reference */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="pb-3 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+              <Globe className="w-4 h-4 text-cyan-400" />
+              <span>Alternative Ports &amp; Cloudflare Proxy Compatibility</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Strictly avoiding ports 80/443 and conflict-prone port 8080 (often occupied by Tomcat, Jenkins, dev servers, or ISP proxies).
+            </p>
+          </div>
+          <span className="text-[10px] font-mono bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2.5 py-1 rounded-full self-start sm:self-auto">
+            Configurable in Menu 6 / .env
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5 text-xs">
+          {/* Port 8880 */}
+          <div className="bg-slate-950 border-2 border-emerald-500/40 rounded-xl p-3.5 space-y-2 relative">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-sm font-bold text-emerald-400">Port 8880</span>
+              <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">Active Default</span>
+            </div>
+            <p className="text-[11px] font-semibold text-slate-200">#1 Cloudflare HTTP Alternate</p>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              Officially supported by Cloudflare CDN caching, DDoS shield, and WAF. Non-root execution with zero 8080 conflicts.
+            </p>
+          </div>
+
+          {/* Port 2052 & 2082 */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-sm font-bold text-cyan-400">Ports 2052 / 2082</span>
+              <span className="text-[9px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">Cloudflare Ready</span>
+            </div>
+            <p className="text-[11px] font-semibold text-slate-200">Secondary Cloudflare Alternates</p>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              Official Cloudflare edge HTTP ports. Ideal fallback if 8880 is occupied by custom network daemons.
+            </p>
+          </div>
+
+          {/* Port 8000 & 8088 */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-sm font-bold text-amber-400">Ports 8000 / 8088</span>
+              <span className="text-[9px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">Direct IP / Custom</span>
+            </div>
+            <p className="text-[11px] font-semibold text-slate-200">Standard Linux High HTTP</p>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              Widely supported for direct VPS IP streaming controls, internal VPN subnets, and custom reverse proxies.
+            </p>
+          </div>
+
+          {/* Port 8443 */}
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-sm font-bold text-violet-400">Port 8443</span>
+              <span className="text-[9px] font-bold bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded">Active HTTPS</span>
+            </div>
+            <p className="text-[11px] font-semibold text-slate-200">Cloudflare HTTPS Alternate</p>
+            <p className="text-[11px] text-slate-400 leading-snug">
+              Standard secure SSL/TLS port bypassing privileged port 443 with SNI multiplexing and Port Fusion.
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 text-xs text-slate-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-mono text-[11px]">
+          <div>
+            Switch HTTP port anytime via <code className="text-amber-400 font-bold">./install.sh</code> Option 6 or <code className="text-amber-400">PORT_HTTP=8880</code> in <code className="text-slate-300">rtmp_config.env</code>
+          </div>
+          <span className="text-slate-500">WireGuard PMTU 1420 &amp; BBR Ready</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -142,9 +142,9 @@ CHAT_KICK=""
 CHAT_TIKTOK=""
 CHAT_HEX_KEY=""
 
-# Host Port Settings (Avoid restricted/conflicting ports 80 and 443)
+# Host Port Settings (Avoid restricted ports 80/443 and conflict-prone port 8080)
 PORT_RTMP="1935"
-PORT_HTTP="8080"
+PORT_HTTP="8880"
 PORT_HTTPS="8443"
 PORT_STATS="8081"
 
@@ -168,9 +168,9 @@ if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
 
-# Strictly avoid restricted ports 80 and 443
-[ "$PORT_HTTP" == "80" ] && PORT_HTTP="8080"
-[ "$PORT_HTTP" == "81" ] && PORT_HTTP="8080"
+# Strictly avoid restricted ports 80 and 443, and migrate 8080 if set to standard alternate
+[ "$PORT_HTTP" == "80" ] && PORT_HTTP="8880"
+[ "$PORT_HTTP" == "81" ] && PORT_HTTP="8880"
 [ "$PORT_HTTPS" == "443" ] && PORT_HTTPS="8443"
 
 save_config() {
@@ -887,16 +887,18 @@ configure_obs() {
 
 configure_domain() {
     clear
-    echo -e "${GREEN}=== Website Address & Web Dashboard Access ===${NC}"
-    echo -e "By default the settings website is reachable at your VPS IP: http://${SERVER_IP}/"
-    echo -e "Current domain: ${SERVER_DOMAIN:-None (using VPS IP)}"
+    echo -e "${GREEN}=== Website Address, Ports & Web Dashboard Access ===${NC}"
+    echo -e "HTTP Port:       ${YELLOW}${PORT_HTTP}${NC} $([ "$PORT_HTTP" == "8880" ] && echo "(Cloudflare Compatible Alternate)" || echo "(Custom Alternate)")"
+    echo -e "HTTPS Port:      ${YELLOW}${PORT_HTTPS}${NC} (Avoids 443)"
+    echo -e "Current domain:  ${SERVER_DOMAIN:-None (using VPS IP)}"
     echo -e "Cloudflare proxy: $([ "$CLOUDFLARE_PROXY" == "true" ] && echo "ON" || echo "OFF")"
     echo -e "Web Dashboard:   $([ "$DISABLE_WEB_UI" == "true" ] && echo -e "${RED}DISABLED (Returns 403)${NC}" || echo -e "${GREEN}ENABLED${NC}")"
     echo ""
     echo "1) Use a Cloudflare domain"
     echo "2) Use the VPS IP address"
-    echo "3) Toggle Web Dashboard Access ($([ "$DISABLE_WEB_UI" == "true" ] && echo "Enable" || echo "Disable"))"
-    echo "4) Keep current settings & exit"
+    echo "3) Change HTTP Port (Current: $PORT_HTTP — Alternatives: 8880, 2052, 2082, 8000, Custom)"
+    echo "4) Toggle Web Dashboard Access ($([ "$DISABLE_WEB_UI" == "true" ] && echo "Enable" || echo "Disable"))"
+    echo "5) Keep current settings & exit"
     echo -e "Selection: \c"
     read -r cf_choice
     case $cf_choice in
@@ -915,9 +917,40 @@ configure_domain() {
         2)
             SERVER_DOMAIN=""
             CLOUDFLARE_PROXY="false"
-            echo -e "${GREEN}The settings website will use the VPS IP: http://${SERVER_IP}/${NC}"
+            echo -e "${GREEN}The settings website will use the VPS IP: http://${SERVER_IP}:${PORT_HTTP}/${NC}"
             ;;
         3)
+            echo ""
+            echo -e "${YELLOW}Select alternative HTTP Port (avoiding 8080 and 80):${NC}"
+            echo "1) 8880 (Recommended - Cloudflare CDN supported, conflict-free)"
+            echo "2) 2052 (Cloudflare CDN supported)"
+            echo "3) 2082 (Cloudflare CDN supported)"
+            echo "4) 8000 (Standard alternative HTTP)"
+            echo "5) 8088 (Standard alternative HTTP)"
+            echo "6) Enter custom port (1024-65535)"
+            echo -e "Choice [1-6]: \c"
+            read -r p_choice
+            case $p_choice in
+                1) PORT_HTTP="8880" ;;
+                2) PORT_HTTP="2052" ;;
+                3) PORT_HTTP="2082" ;;
+                4) PORT_HTTP="8000" ;;
+                5) PORT_HTTP="8088" ;;
+                6)
+                    echo -e "Enter custom port: \c"
+                    read -r custom_p
+                    if [[ "$custom_p" =~ ^[0-9]+$ ]] && [ "$custom_p" -ge 1024 ] && [ "$custom_p" -le 65535 ] && [ "$custom_p" != "80" ] && [ "$custom_p" != "443" ] && [ "$custom_p" != "1935" ]; then
+                        PORT_HTTP="$custom_p"
+                        echo -e "${GREEN}HTTP Port set to $PORT_HTTP${NC}"
+                    else
+                        echo -e "${RED}Invalid port. Retaining $PORT_HTTP.${NC}"
+                    fi
+                    ;;
+                *) echo -e "${YELLOW}Keeping $PORT_HTTP.${NC}" ;;
+            esac
+            echo -e "${GREEN}Configured PORT_HTTP=$PORT_HTTP${NC}"
+            ;;
+        4)
             if [ "$DISABLE_WEB_UI" == "true" ]; then
                 DISABLE_WEB_UI="false"
                 rm -f ./data/disable_web_ui.flag 2>/dev/null || true
@@ -928,6 +961,9 @@ configure_domain() {
                 touch ./data/disable_web_ui.flag
                 echo -e "${YELLOW}Web Dashboard is now DISABLED (Nginx will return 403 Forbidden).${NC}"
             fi
+            ;;
+        5)
+            echo -e "Exiting port and domain configuration."
             ;;
     esac
     DOMAIN_PROMPTED="true"
@@ -1606,7 +1642,7 @@ deep_cleanup_ports_and_processes() {
     # NOTE: Ports 80 and 443 are strictly preserved and never stopped, killed, or unbound.
     # WireGuard tunnels (UDP 51820/51821) and host webservers are never touched.
 
-    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_STATS" 8081 1935 8443 8080 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359)
+    local CANDIDATE_PORTS=("$PORT_RTMP" "$PORT_HTTP" "$PORT_STATS" 8081 1935 8443 8880 8080 19350 19351 19352 19353 19354 19355 19356 19357 19358 19359)
     local PORTS=()
     for p in "${CANDIDATE_PORTS[@]}"; do
         # Do not include port 80, 443, 51820, 51821 under any circumstances

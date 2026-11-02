@@ -22,7 +22,7 @@
 - On timeout: drops ingest publisher and stops relay (platforms end).
 
 ### Website & Network Ports
-- Ports: Alternative non-privileged ports 8080 (HTTP) -> 8080, 8443 (HTTPS) -> 8443. Ports 80 and 443 are strictly avoided and never used.
+- Ports: Alternative non-privileged ports 8880 (HTTP) -> 8880 (or 2052/2082/8000), 8443 (HTTPS) -> 8443. Ports 80, 443, and conflict-prone 8080 are avoided.
 - Web Dashboard: Disabled by default (`DISABLE_WEB_UI="true"`, `/app/data/disable_web_ui.flag`), returning 403 Forbidden to public visitors while keeping RTMP ingest and failover 100% active. Can be enabled on-demand via the UI or `install.sh` menu.
 - Upload Prioritization & WireGuard: 64MB RTMP max message, 16384 out queue, 32MB wmem, 8MB Stunnel buffers, Google BBR with FQ pacing, and `tcp_mtu_probing=1` + `rp_filter=2` for PMTU discovery over WireGuard 1420/1280 MTU tunnels without packet drops. WireGuard ports (UDP 51820/51821) and `wg` processes are strictly protected.
 - Password is OBS_KEY only; protected APIs require `X-Stream-Key` header (frontend `src/api.ts` `authFetch`). Public /stat removed (8081 localhost only).

@@ -2,7 +2,7 @@
 set -e
 
 export SERVER_DOMAIN="${SERVER_DOMAIN:-localhost}"
-export PORT_HTTP="${PORT_HTTP:-8080}"
+export PORT_HTTP="${PORT_HTTP:-8880}"
 export PORT_HTTPS="${PORT_HTTPS:-8443}"
 export DISABLE_WEB_UI="${DISABLE_WEB_UI:-true}"
 
