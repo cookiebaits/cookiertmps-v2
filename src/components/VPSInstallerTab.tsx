@@ -15,27 +15,40 @@ export const VPSInstallerTab: React.FC = () => {
   };
 
   const stunnelConfigSnippet = `; Stunnel RTMPS Proxy Configuration for CookieRTMPS
-[youtube]
-client = yes
-accept = 127.0.0.1:19352
-connect = a.rtmp.youtube.com:443
-checkHost = a.rtmp.youtube.com
-
 [facebook]
 client = yes
 accept = 127.0.0.1:19350
 connect = live-api-s.facebook.com:443
-checkHost = live-api-s.facebook.com
 
-[kick]
+[instagram]
+client = yes
+accept = 127.0.0.1:19351
+connect = live-upload.instagram.com:443
+
+[twitch]
 client = yes
 accept = 127.0.0.1:19353
-connect = fa723fc1b01a.global-contribute.live-video.net:443
+connect = ingest.global-contribute.live-video.net:443
 
 [x-twitter]
 client = yes
 accept = 127.0.0.1:19354
-connect = va.pscp.tv:443`;
+connect = va.pscp.tv:443
+
+[youtube]
+client = yes
+accept = 127.0.0.1:19355
+connect = a.rtmps.youtube.com:443
+
+[kick]
+client = yes
+accept = 127.0.0.1:19356
+connect = fa723fc1b171.global-contribute.live-video.net:443
+
+[tiktok]
+client = yes
+accept = 127.0.0.1:19358
+connect = push.tiktok.com:443`;
 
   const copyText = (txt: string, setFn: (v: boolean) => void) => {
     navigator.clipboard.writeText(txt);
@@ -125,7 +138,7 @@ connect = va.pscp.tv:443`;
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">Configure Domain &amp; Web Dashboard Access</span> — Set alternative ports (8880/8443, no 80/443 or 8080), Cloudflare proxy, and Web UI toggle</li>
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">Configure Optimizations (Upload Prioritization &amp; WireGuard)</span> — BBR FQ pacing, 32MB wmem, RTMP queue, and TCP MTU probing</li>
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">Configure NOALBS Scene Switcher</span> — Disconnection failover MP4 looping fallback with zero stream collisions</li>
-                <li className="text-slate-200"><span className="text-amber-400 font-semibold">Build & Start Server</span> — Compiles Nginx 1.30.3 with RTMP module & launches full dockerized stack</li>
+                <li className="text-slate-200"><span className="text-amber-400 font-semibold">Build & Start Server</span> — Auto swap protection (prevents OOM & SSH disconnects), compiles Nginx 1.30.3 with RTMP module & launches full dockerized stack</li>
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">Run Integration Tests</span> — Automated test suite verifying health, authentication, audio, and failover</li>
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">Stop Server & Uninstall</span> — Cleanly tears down containers, networks, and cleans temporary files</li>
                 <li className="text-slate-200"><span className="text-amber-400 font-semibold">View Logs</span> — Live log viewer for Nginx RTMP, Stunnel, and Python stream validator</li>

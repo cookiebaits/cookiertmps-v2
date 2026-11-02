@@ -1245,6 +1245,50 @@ configure_protection() {
     done
 }
 
+ensure_swap_and_memory_stability() {
+    if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
+        SUDO="sudo"
+    else
+        SUDO=""
+    fi
+
+    # 1. SSH Server Keepalives: Prevents NAT gateways and cloud firewalls dropping connection during compilation
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        if [ ! -f /etc/ssh/sshd_config.d/99-cookiertmps-keepalive.conf ]; then
+            cat << 'SSHEOF' | $SUDO tee /etc/ssh/sshd_config.d/99-cookiertmps-keepalive.conf >/dev/null 2>&1 || true
+ClientAliveInterval 30
+ClientAliveCountMax 120
+SSHEOF
+            $SUDO systemctl reload sshd 2>/dev/null || $SUDO systemctl reload ssh 2>/dev/null || true
+        fi
+    fi
+
+    # 2. Swap Space Protection: Prevents Linux OOM Killer from terminating SSH session or freezing VPS during compilation
+    local total_swap
+    total_swap=$(free -m 2>/dev/null | awk '/Swap:/ {print $2}')
+    total_swap=${total_swap:-0}
+    local total_ram
+    total_ram=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
+    total_ram=${total_ram:-1024}
+
+    if [ "$total_swap" -lt 1024 ] && [ "$total_ram" -lt 4096 ]; then
+        echo -e "${YELLOW}Low memory detected (${total_ram}MB RAM, ${total_swap}MB swap).${NC}"
+        echo -e "${GREEN}Configuring 2GB emergency swapfile to protect SSH connection during compilation...${NC}"
+        if [ ! -f /swapfile ]; then
+            $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
+            $SUDO chmod 600 /swapfile 2>/dev/null || true
+            $SUDO mkswap /swapfile 2>/dev/null || true
+            $SUDO swapon /swapfile 2>/dev/null || true
+            if ! grep -q "/swapfile" /etc/fstab 2>/dev/null; then
+                echo "/swapfile none swap sw 0 0" | $SUDO tee -a /etc/fstab >/dev/null || true
+            fi
+            echo -e "${GREEN}2GB swapfile activated successfully.${NC}"
+        else
+            $SUDO swapon /swapfile 2>/dev/null || true
+        fi
+    fi
+}
+
 enable_bbr_and_tcp_optimizations() {
     echo -e "${GREEN}Configuring Google BBR, High Upload Speed Prioritization & WireGuard TCP Optimizations...${NC}"
     if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
@@ -1253,6 +1297,7 @@ enable_bbr_and_tcp_optimizations() {
         SUDO=""
     fi
 
+    $SUDO modprobe sch_fq 2>/dev/null || true
     $SUDO modprobe tcp_bbr 2>/dev/null || true
 
     SYSCTL_CONF="/etc/sysctl.d/99-stream-optimization.conf"
@@ -1286,6 +1331,13 @@ net.ipv4.conf.default.rp_filter = 2
 SYSCTL_EOF
 
     $SUDO sysctl -p "$SYSCTL_CONF" 2>/dev/null || $SUDO sysctl --system 2>/dev/null || true
+
+    # Explicitly apply loose rp_filter=2 across all active network interfaces
+    for f in /proc/sys/net/ipv4/conf/*/rp_filter; do
+        if [ -f "$f" ]; then
+            echo 2 | $SUDO tee "$f" >/dev/null 2>&1 || true
+        fi
+    done
 
     # Clamp TCP MSS to Path MTU via iptables if available to ensure zero WireGuard packet fragmentation
     if command -v iptables &> /dev/null; then
@@ -1364,6 +1416,7 @@ build_and_run() {
         configure_domain
     fi
 
+    ensure_swap_and_memory_stability
     enable_bbr_and_tcp_optimizations
 
     echo -e "${YELLOW}Checking for port conflicts...${NC}"
@@ -1553,14 +1606,29 @@ build_and_run() {
         echo -e "  OBS Overlay (Unified):     ${OBS_OVERLAY_URL}"
         echo -e "  Web Dashboard:             ${DASHBOARD_URL}"
 
-        echo -e "${YELLOW}Resetting services and running integration tests...${NC}"
-        docker restart cookie-rtmps
-        sleep 3
+        echo -e "${YELLOW}Waiting for services to finish initializing...${NC}"
+        local IS_READY=0
+        for i in $(seq 1 15); do
+            local running restarting
+            running=$(docker inspect -f '{{.State.Running}}' cookie-rtmps 2>/dev/null || echo "false")
+            restarting=$(docker inspect -f '{{.State.Restarting}}' cookie-rtmps 2>/dev/null || echo "false")
+            if [ "$running" == "true" ] && [ "$restarting" != "true" ]; then
+                sleep 2
+                IS_READY=1
+                break
+            fi
+            sleep 1
+        done
 
-        # Run Integration Tests
-        if [ -f "./integration_test.sh" ]; then
-            chmod +x ./integration_test.sh
-            ./integration_test.sh
+        if [ "$IS_READY" -eq 1 ]; then
+            # Run Integration Tests
+            if [ -f "./integration_test.sh" ]; then
+                chmod +x ./integration_test.sh
+                ./integration_test.sh
+            fi
+        else
+            echo -e "${RED}Container failed to stay running. Recent container logs:${NC}"
+            docker logs --tail 30 cookie-rtmps 2>/dev/null || true
         fi
     else
         echo -e "${RED}Failed to start container.${NC}"
@@ -1663,24 +1731,45 @@ deep_cleanup_ports_and_processes() {
         done
     fi
 
+    # Gather SSH session PIDs so deploying NEVER kills the user's active SSH session
+    local PROTECTED_PIDS=" $$ $PPID "
+    if command -v pgrep &> /dev/null; then
+        local found_ssh
+        found_ssh=$(pgrep -d' ' -E '(sshd|ssh)' 2>/dev/null || true)
+        PROTECTED_PIDS="${PROTECTED_PIDS} ${found_ssh} "
+    fi
+
     for port in "${PORTS[@]}"; do
         if command -v lsof &> /dev/null; then
             local pids
             pids=$($SUDO lsof -t -i :"$port" 2>/dev/null || true)
             for pid in $pids; do
                 if [ -n "$pid" ]; then
+                    # Strictly never kill active SSH sessions or current shell
+                    if [[ "$PROTECTED_PIDS" =~ [[:space:]]"$pid"[[:space:]] ]]; then
+                        continue
+                    fi
                     local comm
                     comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
-                    # Protect WireGuard and systemd processes
-                    if [[ "$comm" =~ (wg|wireguard|systemd) ]]; then
+                    # Protect SSH, WireGuard, and systemd processes
+                    if [[ "$comm" =~ (sshd|ssh|wg|wireguard|systemd|init|bash) ]]; then
                         continue
                     fi
                     $SUDO kill -9 "$pid" 2>/dev/null || true
                 fi
             done
         elif command -v fuser &> /dev/null; then
-            $SUDO fuser -k -9 "${port}/tcp" 2>/dev/null || true
-            $SUDO fuser -k -9 "${port}/udp" 2>/dev/null || true
+            local fpids
+            fpids=$($SUDO fuser "${port}/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' || true)
+            for fpid in $fpids; do
+                if [ -n "$fpid" ] && ! [[ "$PROTECTED_PIDS" =~ [[:space:]]"$fpid"[[:space:]] ]]; then
+                    local fcomm
+                    fcomm=$(ps -p "$fpid" -o comm= 2>/dev/null || true)
+                    if ! [[ "$fcomm" =~ (sshd|ssh|wg|wireguard|systemd|init|bash) ]]; then
+                        $SUDO kill -9 "$fpid" 2>/dev/null || true
+                    fi
+                fi
+            done
         fi
     done
 

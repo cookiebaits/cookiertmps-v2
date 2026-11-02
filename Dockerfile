@@ -58,7 +58,8 @@ RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
         --with-cc-opt="-Wno-error" \
         --add-module=/tmp/build/cookie-nginx-rtmp && \
     sed -i 's/-Werror//g' objs/Makefile && \
-    make -j $(getconf _NPROCESSORS_ONLN) CFLAGS="-Wno-error" && \
+    NPROC=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1); [ "$NPROC" -gt 2 ] && NPROC=2; \
+    make -j${NPROC} CFLAGS="-Wno-error" && \
     make install && \
     cp /tmp/build/cookie-nginx-rtmp/stat.xsl /usr/local/nginx/html/stat.xsl && \
     cp conf/mime.types /etc/nginx/mime.types && \
@@ -76,14 +77,14 @@ RUN ARCH=$(dpkg --print-architecture) && \
     rm /tmp/mediamtx.tar.gz
 
 # 3. Configure Stunnel
-RUN mkdir -p /etc/stunnel/conf.d
+RUN mkdir -p /etc/stunnel/conf.d /var/run/stunnel4 /var/log/stunnel4 && \
+    (id -u stunnel4 >/dev/null 2>&1 || useradd -r -s /bin/false stunnel4) && \
+    chown -R stunnel4:stunnel4 /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel && \
+    chmod 775 /var/run/stunnel4 /var/log/stunnel4
 COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
 COPY stunnel/stunnel4 /etc/default/stunnel4
-COPY stunnel/facebook.conf /etc/stunnel/conf.d/facebook.conf
-COPY stunnel/instagram.conf /etc/stunnel/conf.d/instagram.conf
-COPY stunnel/tiktok.conf /etc/stunnel/conf.d/tiktok.conf
-COPY stunnel/kick.conf /etc/stunnel/conf.d/kick.conf
-COPY stunnel/x.conf /etc/stunnel/conf.d/x.conf
+COPY stunnel/*.conf /etc/stunnel/conf.d/
+RUN rm -f /etc/stunnel/conf.d/stunnel.conf
 
 # 4. Copy static web assets from builder
 COPY --from=frontend-builder /app/dist/ /usr/local/nginx/html/

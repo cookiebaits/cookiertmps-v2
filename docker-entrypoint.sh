@@ -163,22 +163,25 @@ if [ -n "${DEBUG}" ]; then
 fi
 
 echo "Starting Stunnel..."
+mkdir -p /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel/conf.d
+(id -u stunnel4 >/dev/null 2>&1 || useradd -r -s /bin/false stunnel4) 2>/dev/null || true
+chown -R stunnel4:stunnel4 /var/run/stunnel4 /var/log/stunnel4 2>/dev/null || true
+chmod 775 /var/run/stunnel4 /var/log/stunnel4 2>/dev/null || true
 # Start stunnel in the background
-stunnel4 /etc/stunnel/stunnel.conf
+stunnel4 /etc/stunnel/stunnel.conf 2>&1 || stunnel /etc/stunnel/stunnel.conf 2>&1 || echo "Warning: Stunnel startup encountered a non-fatal warning."
 
 # --- SSL Initialization (Dummy Certificates) ---
-if [ -n "$SERVER_DOMAIN" ]; then
-    CERT_DIR="/etc/letsencrypt/live/${SERVER_DOMAIN}"
-    if [ ! -f "${CERT_DIR}/fullchain.pem" ]; then
-        echo "SSL certificate not found for ${SERVER_DOMAIN}. Generating dummy certificate..."
-        mkdir -p "${CERT_DIR}"
-        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-            -keyout "${CERT_DIR}/privkey.pem" \
-            -out "${CERT_DIR}/fullchain.pem" \
-            -subj "/CN=${SERVER_DOMAIN}"
-        # Set permissions to prevent Nginx startup issues or security warnings
-        chmod 600 "${CERT_DIR}/privkey.pem" "${CERT_DIR}/fullchain.pem"
-    fi
+CERT_DOMAIN="${SERVER_DOMAIN:-localhost}"
+CERT_DIR="/etc/letsencrypt/live/${CERT_DOMAIN}"
+if [ ! -f "${CERT_DIR}/fullchain.pem" ]; then
+    echo "SSL certificate not found for ${CERT_DOMAIN}. Generating dummy certificate..."
+    mkdir -p "${CERT_DIR}"
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout "${CERT_DIR}/privkey.pem" \
+        -out "${CERT_DIR}/fullchain.pem" \
+        -subj "/CN=${CERT_DOMAIN}" 2>/dev/null || true
+    chmod 644 "${CERT_DIR}/fullchain.pem" 2>/dev/null || true
+    chmod 600 "${CERT_DIR}/privkey.pem" 2>/dev/null || true
 fi
 
 # --- Certbot Renewal Loop ---
@@ -223,6 +226,9 @@ fi
 # and only plays the backup video when NOALBS_ENABLED=true.
 echo "Starting Disconnection Protection..."
 python3 -u /app/stream_protection.py 2>&1 | tee -a /tmp/stream_protection.log &
+
+echo "Verifying Nginx configuration..."
+nginx -t
 
 echo "Starting Nginx..."
 exec "$@" # Execute the CMD from Dockerfile (nginx -g 'daemon off;')

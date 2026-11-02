@@ -42,7 +42,13 @@ check_process() {
 
 check_process "nginx"
 check_process "gunicorn"
-check_process "stunnel4"
+
+echo -n "Checking process 'stunnel' inside container... "
+if docker exec $CONTAINER_NAME pgrep -E '^(stunnel|stunnel4)$' > /dev/null 2>&1; then
+    echo -e "[${GREEN}PASSED${NC}]"
+else
+    echo -e "[${RED}FAILED${NC}]"
+fi
 
 # 3. Check Flask Health Endpoint
 echo -n "Checking Flask Validator health endpoint... "
@@ -62,26 +68,29 @@ fi
 
 NOALBS_ENABLED=$(docker exec $CONTAINER_NAME printenv NOALBS_ENABLED 2>/dev/null || echo "false")
 if [ "$NOALBS_ENABLED" == "true" ]; then
-    echo -n "Checking backup video server (MediaMTX, may need a few minutes on first start)... "
-    for i in $(seq 1 60); do
+    echo -n "Checking backup video server (MediaMTX, may need a moment on first start)... "
+    READY=0
+    for i in $(seq 1 30); do
         if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1:9997/v3/paths/list > /dev/null 2>&1; then
             READY=1; break
         fi
-        sleep 5
+        sleep 2
     done
     if [ "$READY" == "1" ]; then
         echo -e "[${GREEN}PASSED${NC}]"
     else
-        echo -e "[${RED}FAILED${NC}]"
+        echo -e "[${YELLOW}STILL PREPARING / FAILED${NC}]"
         docker exec $CONTAINER_NAME tail -20 /tmp/stream_protection.log 2>/dev/null || true
     fi
 else
     echo -e "Disconnection protection is ${YELLOW}DISABLED${NC}, skipping backup video check."
 fi
 
-# 5. Settings website
-echo -n "Checking settings website on port 80... "
-if docker exec $CONTAINER_NAME curl -s --fail http://127.0.0.1/ > /dev/null; then
+# 5. Settings website / Health endpoint (Alternative HTTP port, avoiding port 80)
+PORT_HTTP=$(docker exec $CONTAINER_NAME printenv PORT_HTTP 2>/dev/null || echo "8880")
+PORT_HTTP=${PORT_HTTP:-8880}
+echo -n "Checking web service on port ${PORT_HTTP}... "
+if docker exec $CONTAINER_NAME curl -s --fail "http://127.0.0.1:${PORT_HTTP}/health" > /dev/null; then
     echo -e "[${GREEN}PASSED${NC}]"
 else
     echo -e "[${RED}FAILED${NC}]"
