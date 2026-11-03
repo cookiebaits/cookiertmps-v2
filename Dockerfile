@@ -86,8 +86,10 @@ COPY stunnel/stunnel.conf /etc/stunnel/stunnel.conf
 COPY stunnel/stunnel4 /etc/default/stunnel4
 COPY stunnel/*.conf /etc/stunnel/conf.d/
 RUN rm -f /etc/stunnel/conf.d/stunnel.conf && \
+    sed -i '/reconnect/d' /etc/stunnel/conf.d/*.conf /etc/stunnel/*.conf 2>/dev/null || true && \
     chmod -R 755 /etc/stunnel && \
-    touch /var/log/stunnel4/stunnel.log && \
+    touch /var/log/stunnel4/stunnel.log /tmp/stunnel.log /tmp/stunnel.pid && \
+    chmod 777 /tmp/stunnel.log /tmp/stunnel.pid /var/log/stunnel4 /var/run/stunnel4 && \
     chown -R stunnel4:stunnel4 /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel && \
     chmod 664 /var/log/stunnel4/stunnel.log
 
@@ -105,7 +107,7 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # Environment variables
-ENV YOUTUBE_URL=rtmp://x.rtmp.youtube.com/live2/
+ENV YOUTUBE_URL=rtmp://a.rtmp.youtube.com/live2/
 ENV FACEBOOK_URL=rtmp://127.0.0.1:19350/rtmp/
 ENV INSTAGRAM_URL=rtmp://127.0.0.1:19351/rtmp/
 ENV TIKTOK_URL=rtmp://127.0.0.1:19358/s_v/

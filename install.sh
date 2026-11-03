@@ -173,6 +173,9 @@ fi
 [ "$PORT_HTTP" == "81" ] && PORT_HTTP="8880"
 [ "$PORT_HTTPS" == "443" ] && PORT_HTTPS="8443"
 
+# Automatically sanitize any obsolete stunnel options on host
+sed -i '/reconnect/d' stunnel/*.conf 2>/dev/null || true
+
 save_config() {
     cat <<ENV_EOF > "$CONFIG_FILE"
 YOUTUBE_URL="$YOUTUBE_URL"
@@ -1514,8 +1517,9 @@ build_and_run() {
         bun run build 2>/dev/null || true
     fi
 
-    echo -e "${GREEN}Building Docker Image...${NC}"
-    docker build -t cookie-rtmps .
+    sed -i '/reconnect/d' stunnel/*.conf 2>/dev/null || true
+    echo -e "${GREEN}Building Docker Image (fresh without stale cached layers)...${NC}"
+    docker build --no-cache -t cookie-rtmps .
 
     echo -e "${YELLOW}Stopping any existing container and verifying port freedom...${NC}"
     docker stop cookie-rtmps 2>/dev/null || true

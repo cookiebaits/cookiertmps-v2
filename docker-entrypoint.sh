@@ -167,6 +167,8 @@ mkdir -p /var/run/stunnel4 /var/log/stunnel4 /etc/stunnel/conf.d
 touch /var/log/stunnel4/stunnel.log /tmp/stunnel.log /tmp/stunnel.pid 2>/dev/null || true
 chmod 777 /var/run/stunnel4 /var/log/stunnel4 /tmp 2>/dev/null || true
 chmod 666 /var/log/stunnel4/stunnel.log /tmp/stunnel.log /tmp/stunnel.pid 2>/dev/null || true
+# Strip any obsolete/invalid reconnect directives from all conf files
+sed -i '/reconnect/d' /etc/stunnel/conf.d/*.conf /etc/stunnel/*.conf 2>/dev/null || true
 chmod -R 755 /etc/stunnel 2>/dev/null || true
 
 STUNNEL_CMD=""
