@@ -103,7 +103,20 @@ add_push() {
             sed -i "s|#${template_marker}| |g" $TMP_TEMPLATE
         else
             echo "${platform_name} activated."
-            local full_push="push ${push_url}${key_value};"
+            # Clean and properly format RTMP push directive:
+            # Handles trailing slashes, leading slashes on keys, and query parameters (e.g. ?backup=1)
+            local clean_key="${key_value#/}"
+            local target_push=""
+            if [[ "$push_url" == *"?"* ]]; then
+                local base_url="${push_url%%\?*}"
+                local query_params="${push_url#*\?}"
+                base_url="${base_url%/}"
+                target_push="${base_url}/${clean_key}?${query_params}"
+            else
+                local base_url="${push_url%/}"
+                target_push="${base_url}/${clean_key}"
+            fi
+            local full_push="push ${target_push};"
             local escaped_push
             escaped_push=$(echo "$full_push" | sed 's/\\/\\\\/g; s/|/\\|/g; s/&/\\&/g')
             sed -i "s|#${template_marker}|${escaped_push}|g" $TMP_TEMPLATE

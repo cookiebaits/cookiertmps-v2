@@ -83,7 +83,7 @@ handle_existing_instance_upgrade() {
 handle_existing_instance_upgrade
 
 # Default values
-YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/"
+YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/"
 YOUTUBE_KEY=""
 FACEBOOK_URL="rtmp://127.0.0.1:19350/rtmp/"
 FACEBOOK_KEY=""
@@ -106,7 +106,7 @@ RTMP1_URL=""
 RTMP1_KEY=""
 
 # Vertical Defaults
-V_YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/"
+V_YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/"
 V_YOUTUBE_KEY=""
 V_TWITCH_URL="rtmp://127.0.0.1:19353/app/"
 V_TWITCH_KEY=""
@@ -353,18 +353,18 @@ configure_keys() {
             1)
                prompt_for_key "YouTube Key" "YOUTUBE_KEY"
                echo -e "Select YouTube Server:"
-               echo "  1) Primary (rtmp://a.rtmp.youtube.com/live2/)"
-               echo "  2) Backup (rtmp://b.rtmp.youtube.com/live2?backup=1)"
-               echo "  3) Secure Primary (rtmps://a.rtmps.youtube.com/live2/ -> via Stunnel)"
-               echo "  4) Secure Backup (rtmps://b.rtmps.youtube.com/live2?backup=1 -> via Stunnel)"
+               echo "  1) Secure Primary (rtmps://a.rtmps.youtube.com:443 -> via Stunnel) [Recommended]"
+               echo "  2) Secure Backup (rtmps://b.rtmps.youtube.com:443 -> via Stunnel)"
+               echo "  3) Standard Primary (rtmp://a.rtmp.youtube.com/live2/)"
+               echo "  4) Standard Backup (rtmp://b.rtmp.youtube.com/live2?backup=1)"
                echo "  5) Custom URL"
                echo -e "Option (Current URL: $YOUTUBE_URL): \c"
                read -r y_opt
                case $y_opt in
-                   1) YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/" ;;
-                   2) YOUTUBE_URL="rtmp://b.rtmp.youtube.com/live2?backup=1" ;;
-                   3) YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/" ;;
-                   4) YOUTUBE_URL="rtmp://127.0.0.1:19357/live2?backup=1" ;;
+                   1) YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/" ;;
+                   2) YOUTUBE_URL="rtmp://127.0.0.1:19357/live2?backup=1" ;;
+                   3) YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/" ;;
+                   4) YOUTUBE_URL="rtmp://b.rtmp.youtube.com/live2?backup=1" ;;
                    5)
                       echo -e "Enter Custom YouTube Server URL: "
                       read -r y_url
@@ -588,15 +588,17 @@ configure_vertical_keys() {
             1)
                prompt_for_key "YouTube Vertical Key" "V_YOUTUBE_KEY"
                echo -e "Select YouTube Server:"
-               echo "  1) Primary (rtmp://a.rtmp.youtube.com/live2/)"
-               echo "  2) Secure Primary (rtmps://a.rtmps.youtube.com/live2/ -> via Stunnel)"
-               echo "  3) Custom URL"
+               echo "  1) Secure Primary (rtmps://a.rtmps.youtube.com:443 -> via Stunnel) [Recommended]"
+               echo "  2) Secure Backup (rtmps://b.rtmps.youtube.com:443 -> via Stunnel)"
+               echo "  3) Standard Primary (rtmp://a.rtmp.youtube.com/live2/)"
+               echo "  4) Custom URL"
                echo -e "Option (Current URL: $V_YOUTUBE_URL): \c"
                read -r y_opt
                case $y_opt in
-                   1) V_YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/" ;;
-                   2) V_YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/" ;;
-                   3)
+                   1) V_YOUTUBE_URL="rtmp://127.0.0.1:19355/live2/" ;;
+                   2) V_YOUTUBE_URL="rtmp://127.0.0.1:19357/live2?backup=1" ;;
+                   3) V_YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/" ;;
+                   4)
                       echo -e "Enter Custom YouTube Server URL: "
                       read -r y_url
                       if [ ! -z "$y_url" ]; then

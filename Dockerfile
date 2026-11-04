@@ -107,11 +107,11 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # Environment variables
-ENV YOUTUBE_URL=rtmp://a.rtmp.youtube.com/live2/
+ENV YOUTUBE_URL=rtmp://127.0.0.1:19355/live2/
 ENV FACEBOOK_URL=rtmp://127.0.0.1:19350/rtmp/
 ENV INSTAGRAM_URL=rtmp://127.0.0.1:19351/rtmp/
 ENV TIKTOK_URL=rtmp://127.0.0.1:19358/s_v/
-ENV TWITCH_URL=rtmp://ingest.global-contribute.live-video.net/app/
+ENV TWITCH_URL=rtmp://127.0.0.1:19353/app/
 ENV TROVO_URL=rtmp://livepush.trovo.live/live/
 ENV KICK_URL=rtmp://127.0.0.1:19356/kick/
 ENV X_URL=rtmp://127.0.0.1:19354/x/

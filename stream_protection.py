@@ -157,7 +157,7 @@ def build_output_video(source, orientation):
     if source:
         inputs = ["-i", source]
         if probe_has_stream(source, "a"):
-            maps = ["-map", "0:v:0", "-map", "0:a?"]
+            maps = ["-map", "0:v:0", "-map", "0:a:0?"]
         else:
             inputs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
             maps = ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
@@ -172,7 +172,6 @@ def build_output_video(source, orientation):
            "-g", "120", "-keyint_min", "120", "-sc_threshold", "0",
            "-b:v", "4500k", "-maxrate", "4500k", "-bufsize", "9000k",
            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
-           "-af", "aresample=async=1:first_pts=0",
            "-movflags", "+faststart", tmp]
     log.info(f"Preparing {orientation} backup video ({w}x{h})...")
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -220,7 +219,10 @@ def write_mediamtx_config(videos):
         "paths:",
     ]
     for orientation, video in videos.items():
-        lines += [f"  feed/{orientation}:", "    alwaysAvailable: true", f"    alwaysAvailableFile: {json.dumps(video)}"]
+        if video and is_valid_file(video):
+            lines += [f"  feed/{orientation}:", "    alwaysAvailable: true", f"    alwaysAvailableFile: {json.dumps(video)}"]
+        else:
+            lines += [f"  feed/{orientation}:", "    alwaysAvailable: true"]
     with open(MTX_CONFIG, "w") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -305,32 +307,30 @@ class Channel:
         src = f"{NGINX_RTMP}/{self.ingest_app}/{self.stream_name}"
         if not self.protected:
             return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
-                    "-fflags", "+genpts+nobuffer+discardcorrupt",
+                    "-fflags", "+genpts",
                     "-rw_timeout", "15000000", "-i", src,
-                    "-map", "0:v:0?", "-map", "0:a?",
+                    "-map", "0:v:0?", "-map", "0:a:0?",
                     "-c:v", "copy",
                     "-c:a", "copy",
                     "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                     "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
-                "-fflags", "+genpts+nobuffer+discardcorrupt",
+                "-fflags", "+genpts",
                 "-rw_timeout", "15000000", "-i", src,
-                "-map", "0:v:0?", "-map", "0:a?",
+                "-map", "0:v:0?", "-map", "0:a:0?",
                 "-c:v", "copy",
                 "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
-                "-af", "aresample=async=1:first_pts=0",
                 "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                 "-f", "flv", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}"]
 
     def relay_cmd(self):
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
-                "-fflags", "+genpts+nobuffer+discardcorrupt",
+                "-fflags", "+genpts",
                 "-rw_timeout", "15000000",
                 "-i", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}",
-                "-map", "0:v:0?", "-map", "0:a?",
+                "-map", "0:v:0?", "-map", "0:a:0?",
                 "-c:v", "copy",
-                "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
-                "-af", "aresample=async=1:first_pts=0",
+                "-c:a", "copy",
                 "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                 "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
 
