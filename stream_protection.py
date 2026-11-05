@@ -83,11 +83,34 @@ def http_get(url, timeout=3):
 
 class Settings:
     def __init__(self):
-        self.enabled = os.getenv("NOALBS_ENABLED", "true").strip().lower() == "true"
-        self.low_kbps = env_int("LOW_BITRATE", 1000, 1)
-        self.restore_kbps = max(self.low_kbps, env_int("RESTORE_BITRATE", 1500, 1))
-        self.timeout = env_int("CLOUD_BRB_TIMEOUT", 300, 5)
-        self.video_url = os.getenv("BRB_VIDEO_URL", "").strip() or DEFAULT_VIDEO_URL
+        self.reload()
+
+    def reload(self):
+        env_file = os.path.join(DATA_DIR, "rtmp_config.env")
+        file_env = {}
+        if os.path.isfile(env_file):
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            k, v = line.split('=', 1)
+                            file_env[k.strip()] = v.strip().strip('"').strip("'")
+            except Exception:
+                pass
+
+        def get_int(name, default, minimum=0):
+            val = file_env.get(name, os.getenv(name, str(default)))
+            try:
+                return max(minimum, int(str(val).strip()))
+            except (ValueError, TypeError):
+                return default
+
+        self.enabled = str(file_env.get("NOALBS_ENABLED", os.getenv("NOALBS_ENABLED", "true"))).strip().lower() == "true"
+        self.low_kbps = get_int("LOW_BITRATE", 1000, 1)
+        self.restore_kbps = max(self.low_kbps, get_int("RESTORE_BITRATE", 1500, 1))
+        self.timeout = get_int("CLOUD_BRB_TIMEOUT", 300, 5)
+        self.video_url = (file_env.get("BRB_VIDEO_URL") or os.getenv("BRB_VIDEO_URL", "")).strip() or DEFAULT_VIDEO_URL
         self.ingest_apps = {"horizontal": os.getenv("APP_NAME", "live") or "live", "vertical": "vertical"}
 
 
@@ -122,7 +145,7 @@ def ensure_source_video(url):
     tmp = source + ".download"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as out:
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as out:
             while True:
                 chunk = r.read(1 << 20)
                 if not chunk:
@@ -155,23 +178,25 @@ def build_output_video(source, orientation):
     tmp = target + ".tmp.mp4"
     vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps=60,format=yuv420p"
     if source:
-        inputs = ["-i", source]
+        inputs = ["-t", "8", "-i", source]
         if probe_has_stream(source, "a"):
             maps = ["-map", "0:v:0", "-map", "0:a:0?"]
         else:
             inputs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-            maps = ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            maps = ["-map", "0:v:0", "-map", "1:a:0"]
     else:
         log.warning(f"No backup video available, generating a plain standby screen for {orientation}.")
-        inputs = ["-f", "lavfi", "-i", f"color=c=0x0f172a:s={w}x{h}:r=60:d=5",
+        inputs = ["-f", "lavfi", "-i", f"color=c=0x0f172a:s={w}x{h}:r=60:d=4",
                   "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-        maps = ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        maps = ["-map", "0:v:0", "-map", "1:a:0"]
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *inputs, *maps,
-           "-vf", vf, "-threads", "2", "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-level:v", "4.2",
+           "-t", "8",
+           "-vf", vf, "-threads", "2", "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "high", "-level:v", "4.2",
            "-g", "120", "-keyint_min", "120", "-sc_threshold", "0",
            "-b:v", "4500k", "-maxrate", "4500k", "-bufsize", "9000k",
            "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+           "-shortest",
            "-movflags", "+faststart", tmp]
     log.info(f"Preparing {orientation} backup video ({w}x{h})...")
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -262,7 +287,11 @@ class Proc:
             except subprocess.TimeoutExpired:
                 self.p.kill()
                 self.p.wait()
-        self.log_file.close()
+        try:
+            if hasattr(self, 'log_file') and not self.log_file.closed:
+                self.log_file.close()
+        except Exception:
+            pass
 
 
 class Channel:
@@ -307,6 +336,7 @@ class Channel:
         src = f"{NGINX_RTMP}/{self.ingest_app}/{self.stream_name}"
         if not self.protected:
             return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
+                    "-analyzeduration", "3000000", "-probesize", "3000000",
                     "-fflags", "+genpts",
                     "-rw_timeout", "15000000", "-i", src,
                     "-map", "0:v:0?", "-map", "0:a:0?",
@@ -315,16 +345,19 @@ class Channel:
                     "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                     "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-analyzeduration", "3000000", "-probesize", "3000000",
                 "-fflags", "+genpts",
                 "-rw_timeout", "15000000", "-i", src,
                 "-map", "0:v:0?", "-map", "0:a:0?",
                 "-c:v", "copy",
                 "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+                "-af", "aresample=async=1000",
                 "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                 "-f", "flv", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}"]
 
     def relay_cmd(self):
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-analyzeduration", "3000000", "-probesize", "3000000",
                 "-fflags", "+genpts",
                 "-rw_timeout", "15000000",
                 "-i", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}",
@@ -361,14 +394,13 @@ class Channel:
         present = self.stream_name is not None
         kbps = self.kbps
         if self.state == "idle":
-            if present and kbps is not None and kbps >= self.s.low_kbps:
+            if present:
                 self.start_feed()
                 if self.protected:
-                    time.sleep(1)
                     self.start_relay()
                 self.state = "live"
                 self.low_count = 0
-                self.event(f"Stream received ({kbps} kbps). Broadcasting to platforms.")
+                self.event(f"Stream received ({kbps if kbps is not None else 'starting'} kbps). Broadcasting to platforms.")
             return
 
         if self.protected and self.relay and not self.relay.alive():
@@ -397,14 +429,14 @@ class Channel:
             return
 
         if self.state == "backup":
-            if present and kbps is not None and kbps >= self.s.restore_kbps:
+            if present and (kbps is None or kbps >= self.s.low_kbps):
                 self.good_count += 1
                 if self.good_count >= RESTORE_GRACE_SECONDS:
                     self.start_feed()
                     self.state = "live"
                     self.backup_since = None
                     self.low_count = 0
-                    self.event(f"Stream recovered ({kbps} kbps). Switched back to live.")
+                    self.event(f"Stream recovered ({kbps if kbps is not None else 'restoring'} kbps). Switched back to live.")
                     return
             else:
                 self.good_count = 0
@@ -505,6 +537,7 @@ def main():
 
     while not stop.is_set():
         now = time.time()
+        settings.reload()
         if mtx and mtx.ensure_running():
             for c in channels:
                 if c.relay:

@@ -149,6 +149,7 @@ add_push "V-TikTok"    "V_TIKTOK_KEY"    "V_TIKTOK_URL"    "v_tiktok"
 add_push "V-Twitch"    "V_TWITCH_KEY"    "V_TWITCH_URL"    "v_twitch"
 add_push "V-Kick"      "V_KICK_KEY"      "V_KICK_URL"      "v_kick"
 add_push "V-X (Twitter)" "V_X_KEY"        "V_X_URL"         "v_x"
+add_push "V-Trovo"      "V_TROVO_KEY"    "V_TROVO_URL"     "v_trovo"
 add_push "V-RTMP1"      "V_RTMP1_KEY"    "V_RTMP1_URL"     "v_rtmp1"
 
 

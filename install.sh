@@ -1534,6 +1534,7 @@ build_and_run() {
     PORT_MAPS="-p ${PORT_RTMP}:1935 -p ${PORT_HTTP}:${PORT_HTTP} -p ${PORT_HTTPS}:${PORT_HTTPS}"
 
     mkdir -p ./data
+    cp -f "$CONFIG_FILE" ./data/rtmp_config.env 2>/dev/null || true
     if [ "$DISABLE_WEB_UI" == "true" ]; then
         touch ./data/disable_web_ui.flag
     else
