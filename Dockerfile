@@ -37,9 +37,15 @@ RUN echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/99fast && \
 
 # 2. Build and install Nginx with cookie-nginx-rtmp (permanently cached unless RTMP module changes)
 COPY cookie-nginx-rtmp /tmp/build/cookie-nginx-rtmp
+COPY .build_cache* /tmp/build_cache/
 RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
     cd /tmp/build/nginx && \
-    wget -qO ${NGINX_VERSION}.tar.gz https://nginx.org/download/${NGINX_VERSION}.tar.gz && \
+    if [ -f "/tmp/build_cache/${NGINX_VERSION}.tar.gz" ]; then \
+        echo "Using cached ${NGINX_VERSION}.tar.gz from quick install cache..." && \
+        cp "/tmp/build_cache/${NGINX_VERSION}.tar.gz" "${NGINX_VERSION}.tar.gz"; \
+    else \
+        wget -qO ${NGINX_VERSION}.tar.gz https://nginx.org/download/${NGINX_VERSION}.tar.gz; \
+    fi && \
     tar -zxf ${NGINX_VERSION}.tar.gz && \
     cd ${NGINX_VERSION} && \
     ./configure \
@@ -72,10 +78,16 @@ RUN mkdir -p /tmp/build/nginx /usr/local/nginx/html /var/lock/nginx && \
 ENV MEDIAMTX_VERSION=v1.21.3
 RUN ARCH=$(dpkg --print-architecture) && \
     case "$ARCH" in amd64) MTX_ARCH=amd64 ;; arm64) MTX_ARCH=arm64 ;; armhf) MTX_ARCH=armv7 ;; *) echo "Unsupported arch $ARCH"; exit 1 ;; esac && \
-    wget -qO /tmp/mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" && \
-    tar -xzf /tmp/mediamtx.tar.gz -C /usr/local/bin mediamtx && \
+    if [ -f "/tmp/build_cache/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" ]; then \
+        echo "Using cached MediaMTX archive..." && \
+        tar -xzf "/tmp/build_cache/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" -C /usr/local/bin mediamtx; \
+    else \
+        wget -qO /tmp/mediamtx.tar.gz "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" && \
+        tar -xzf /tmp/mediamtx.tar.gz -C /usr/local/bin mediamtx && \
+        rm -f /tmp/mediamtx.tar.gz; \
+    fi && \
     chmod +x /usr/local/bin/mediamtx && \
-    rm /tmp/mediamtx.tar.gz
+    rm -rf /tmp/build_cache
 
 # 3. Configure Stunnel
 RUN mkdir -p /etc/stunnel/conf.d /var/run/stunnel4 /var/log/stunnel4 && \

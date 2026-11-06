@@ -116,7 +116,15 @@ add_push() {
                 local base_url="${push_url%/}"
                 target_push="${base_url}/${clean_key}"
             fi
-            local full_push="push ${target_push};"
+            local extra_params=""
+            if [[ "$platform_name" =~ [Yy]outube ]] && [[ "$push_url" =~ 127\.0\.0\.1:19355 ]]; then
+                extra_params=" tcUrl=rtmp://a.rtmp.youtube.com/live2"
+            elif [[ "$platform_name" =~ [Yy]outube ]] && [[ "$push_url" =~ 127\.0\.0\.1:19357 ]]; then
+                extra_params=" tcUrl=rtmp://b.rtmp.youtube.com/live2"
+            elif [[ "$platform_name" =~ [Tt]witch ]] && [[ "$push_url" =~ 127\.0\.0\.1:19353 ]]; then
+                extra_params=" tcUrl=rtmp://ingest.global-contribute.live-video.net/app"
+            fi
+            local full_push="push ${target_push}${extra_params};"
             local escaped_push
             escaped_push=$(echo "$full_push" | sed 's/\\/\\\\/g; s/|/\\|/g; s/&/\\&/g')
             sed -i "s|#${template_marker}|${escaped_push}|g" $TMP_TEMPLATE

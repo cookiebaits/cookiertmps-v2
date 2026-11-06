@@ -6,6 +6,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Quick reinstall cache folder located at the same root/parent location (strictly no secrets/stream keys)
+CACHE_DIR="${COOKIE_CACHE_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)/cookiertmp_cache}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,7 +20,7 @@ handle_existing_instance_upgrade() {
     local HAS_OLD_CONFIG=0
 
     # Check parent directory or common clone paths (/root/CookieRTMP-v2, /root/cookie-rtmps, ./rtmp_config.env)
-    if [ -f "rtmp_config.env" ] || [ -f "../rtmp_config.env" ] || [ -d "../CookieRTMP-v2/data" ] || [ -d "../cookie-rtmps/data" ]; then
+    if [ -f "rtmp_config.env" ] || [ -f "../rtmp_config.env" ] || [ -d "../CookieRTMP-v2/data" ] || [ -d "../cookie-rtmps/data" ] || [ -d "$CACHE_DIR" ]; then
         HAS_OLD_CONFIG=1
     fi
 
@@ -33,6 +36,12 @@ handle_existing_instance_upgrade() {
         elif [ ! -f "rtmp_config.env" ] && [ -f "../cookie-rtmps/rtmp_config.env" ]; then
             echo -e "${GREEN}Restoring configuration from ../cookie-rtmps/rtmp_config.env...${NC}"
             cp "../cookie-rtmps/rtmp_config.env" "./rtmp_config.env" 2>/dev/null || true
+        fi
+
+        # Restore cookie-nginx-rtmp module from cache if missing in current clone
+        if [ ! -d "cookie-nginx-rtmp" ] && [ -d "$CACHE_DIR/modules/cookie-nginx-rtmp" ]; then
+            echo -e "${GREEN}Restoring cookie-nginx-rtmp module from quick reinstall cache...${NC}"
+            cp -r "$CACHE_DIR/modules/cookie-nginx-rtmp" ./cookie-nginx-rtmp 2>/dev/null || true
         fi
 
         # Targeted update check: ONLY check for updates related to RTMP modules and the installer itself
@@ -1406,6 +1415,129 @@ check_port() {
     fi
 }
 
+sync_build_cache_and_check_updates() {
+    echo -e "${YELLOW}========================================================================${NC}"
+    echo -e "${YELLOW}  Quick Reinstall Cache: Checking & syncing assets ($CACHE_DIR)...  ${NC}"
+    echo -e "${YELLOW}========================================================================${NC}"
+
+    mkdir -p "$CACHE_DIR/downloads" "$CACHE_DIR/modules"
+    local MANIFEST="$CACHE_DIR/cache_manifest.env"
+
+    # Extract target versions from current Dockerfile
+    local TARGET_NGINX_VER
+    TARGET_NGINX_VER=$(grep -m1 '^ENV NGINX_VERSION=' Dockerfile 2>/dev/null | cut -d= -f2 | tr -d ' \r\n')
+    TARGET_NGINX_VER=${TARGET_NGINX_VER:-"nginx-1.30.3"}
+
+    local TARGET_MEDIAMTX_VER
+    TARGET_MEDIAMTX_VER=$(grep -m1 '^ENV MEDIAMTX_VERSION=' Dockerfile 2>/dev/null | cut -d= -f2 | tr -d ' \r\n')
+    TARGET_MEDIAMTX_VER=${TARGET_MEDIAMTX_VER:-"v1.21.3"}
+
+    local ARCH
+    ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m 2>/dev/null || echo "amd64")
+    local MTX_ARCH="amd64"
+    case "$ARCH" in
+        x86_64|amd64) MTX_ARCH="amd64" ;;
+        aarch64|arm64) MTX_ARCH="arm64" ;;
+        armv7l|armhf)  MTX_ARCH="armv7" ;;
+        *) MTX_ARCH="amd64" ;;
+    esac
+
+    local TARGET_RTMP_HASH=""
+    if [ -d "cookie-nginx-rtmp" ]; then
+        TARGET_RTMP_HASH=$(find cookie-nginx-rtmp -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+    fi
+
+    # Read existing cache manifest if present
+    local CACHED_NGINX_VER=""
+    local CACHED_MEDIAMTX_VER=""
+    local CACHED_RTMP_HASH=""
+    if [ -f "$MANIFEST" ]; then
+        # shellcheck disable=SC1090
+        source "$MANIFEST" 2>/dev/null || true
+        CACHED_NGINX_VER="$CACHED_NGINX_VERSION"
+        CACHED_MEDIAMTX_VER="$CACHED_MEDIAMTX_VERSION"
+    fi
+
+    # Smart check: if user updated repository with newer version, prompt to replace older cached library
+    if [ -n "$CACHED_NGINX_VER" ] && [ "$CACHED_NGINX_VER" != "$TARGET_NGINX_VER" ]; then
+        echo -e "${YELLOW}Notice: Current repository requests Nginx ${GREEN}${TARGET_NGINX_VER}${YELLOW}, but cache has older ${RED}${CACHED_NGINX_VER}${YELLOW}.${NC}"
+        echo -e "Would you like to remove the older Nginx library from cache and update with the new version? [Y/n]: \c"
+        read -r update_ng
+        if [ -z "$update_ng" ] || [[ "$update_ng" =~ ^[Yy] ]]; then
+            echo -e "${GREEN}Purging older Nginx cache (${CACHED_NGINX_VER})...${NC}"
+            rm -f "$CACHE_DIR/downloads/nginx-"*.tar.gz 2>/dev/null || true
+            CACHED_NGINX_VER=""
+        fi
+    fi
+
+    if [ -n "$CACHED_MEDIAMTX_VER" ] && [ "$CACHED_MEDIAMTX_VER" != "$TARGET_MEDIAMTX_VER" ]; then
+        echo -e "${YELLOW}Notice: Current repository requests MediaMTX ${GREEN}${TARGET_MEDIAMTX_VER}${YELLOW}, but cache has older ${RED}${CACHED_MEDIAMTX_VER}${YELLOW}.${NC}"
+        echo -e "Would you like to remove the older MediaMTX server from cache and update with the new version? [Y/n]: \c"
+        read -r update_mtx
+        if [ -z "$update_mtx" ] || [[ "$update_mtx" =~ ^[Yy] ]]; then
+            echo -e "${GREEN}Purging older MediaMTX cache (${CACHED_MEDIAMTX_VER})...${NC}"
+            rm -f "$CACHE_DIR/downloads/mediamtx_"*.tar.gz 2>/dev/null || true
+            CACHED_MEDIAMTX_VER=""
+        fi
+    fi
+
+    if [ -n "$CACHED_RTMP_HASH" ] && [ -n "$TARGET_RTMP_HASH" ] && [ "$CACHED_RTMP_HASH" != "$TARGET_RTMP_HASH" ]; then
+        echo -e "${YELLOW}Notice: Detected updated 'cookie-nginx-rtmp' module files in the repository.${NC}"
+        echo -e "Would you like to update the cached RTMP module with the new files? [Y/n]: \c"
+        read -r update_mod
+        if [ -z "$update_mod" ] || [[ "$update_mod" =~ ^[Yy] ]]; then
+            echo -e "${GREEN}Updating cached RTMP module...${NC}"
+            rm -rf "$CACHE_DIR/modules/cookie-nginx-rtmp" 2>/dev/null || true
+            cp -r "cookie-nginx-rtmp" "$CACHE_DIR/modules/cookie-nginx-rtmp" 2>/dev/null || true
+            CACHED_RTMP_HASH="$TARGET_RTMP_HASH"
+        fi
+    fi
+
+    # Populate cache downloads if not already present
+    local NGINX_TARBALL="$CACHE_DIR/downloads/${TARGET_NGINX_VER}.tar.gz"
+    if [ ! -f "$NGINX_TARBALL" ]; then
+        echo -e "${YELLOW}Downloading and caching Nginx archive (${TARGET_NGINX_VER})...${NC}"
+        curl -f -sSL "https://nginx.org/download/${TARGET_NGINX_VER}.tar.gz" -o "$NGINX_TARBALL" || \
+        wget -qO "$NGINX_TARBALL" "https://nginx.org/download/${TARGET_NGINX_VER}.tar.gz" || true
+    fi
+
+    local MTX_TARBALL="$CACHE_DIR/downloads/mediamtx_${TARGET_MEDIAMTX_VER}_linux_${MTX_ARCH}.tar.gz"
+    if [ ! -f "$MTX_TARBALL" ]; then
+        echo -e "${YELLOW}Downloading and caching MediaMTX archive (${TARGET_MEDIAMTX_VER} for ${MTX_ARCH})...${NC}"
+        curl -f -sSL "https://github.com/bluenviron/mediamtx/releases/download/${TARGET_MEDIAMTX_VER}/mediamtx_${TARGET_MEDIAMTX_VER}_linux_${MTX_ARCH}.tar.gz" -o "$MTX_TARBALL" || \
+        wget -qO "$MTX_TARBALL" "https://github.com/bluenviron/mediamtx/releases/download/${TARGET_MEDIAMTX_VER}/mediamtx_${TARGET_MEDIAMTX_VER}_linux_${MTX_ARCH}.tar.gz" || true
+    fi
+
+    if [ -d "cookie-nginx-rtmp" ] && [ ! -d "$CACHE_DIR/modules/cookie-nginx-rtmp" ]; then
+        echo -e "${YELLOW}Caching cookie-nginx-rtmp module in quick reinstall cache...${NC}"
+        cp -r "cookie-nginx-rtmp" "$CACHE_DIR/modules/cookie-nginx-rtmp" 2>/dev/null || true
+    fi
+
+    # Strict Privacy Enforcement: Purge any personal credentials, keys, or passwords from cache folder
+    rm -f "$CACHE_DIR"/*.env "$CACHE_DIR"/*.key "$CACHE_DIR"/*.pem 2>/dev/null || true
+    rm -rf "$CACHE_DIR/data" 2>/dev/null || true
+
+    # Save manifest with library versions and hashes only (NO personal secrets)
+    cat << MANIFEST_EOF > "$MANIFEST"
+# CookieRTMPS Reinstall Cache Manifest (Strictly No Secrets)
+CACHED_NGINX_VERSION="${TARGET_NGINX_VER}"
+CACHED_MEDIAMTX_VERSION="${TARGET_MEDIAMTX_VER}"
+CACHED_RTMP_MODULE_HASH="${TARGET_RTMP_HASH}"
+MANIFEST_EOF
+    chmod 644 "$MANIFEST" 2>/dev/null || true
+
+    # Stage local .build_cache inside current build directory for Docker build
+    mkdir -p ./.build_cache
+    if [ -f "$NGINX_TARBALL" ]; then
+        cp -f "$NGINX_TARBALL" ./.build_cache/ 2>/dev/null || true
+    fi
+    if [ -f "$MTX_TARBALL" ]; then
+        cp -f "$MTX_TARBALL" ./.build_cache/ 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}Quick reinstall cache verified and ready.${NC}"
+}
+
 build_and_run() {
     if ! command -v docker &> /dev/null; then
         echo -e "${RED}Docker is not installed! Please run 'Install Docker' first.${NC}"
@@ -1520,8 +1652,11 @@ build_and_run() {
     fi
 
     sed -i '/reconnect/d' stunnel/*.conf 2>/dev/null || true
+    echo -e "${GREEN}Syncing libraries and buildpack caches for fast install...${NC}"
+    sync_build_cache_and_check_updates
     echo -e "${GREEN}Building Docker Image (fresh without stale cached layers)...${NC}"
     docker build --no-cache -t cookie-rtmps .
+    rm -rf ./.build_cache 2>/dev/null || true
 
     echo -e "${YELLOW}Stopping any existing container and verifying port freedom...${NC}"
     docker stop cookie-rtmps 2>/dev/null || true

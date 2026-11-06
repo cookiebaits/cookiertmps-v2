@@ -845,12 +845,42 @@ ngx_rtmp_exec_run(ngx_rtmp_exec_t *e)
              * Hardened POSIX Process Execution:
              * Rather than invoking execvp directly with an unvalidated PATH search, we harden
              * binary resolution:
-             * 1. If an absolute path is provided, execute directly via execve() with environ.
-             * 2. If a bare binary name is provided, resolve only against trusted system paths
-             *    (/usr/local/bin, /usr/bin, /bin, /usr/local/sbin, /usr/sbin) with access(X_OK).
-             * 3. Fall back to execvp() only if not found in standard system paths.
-             * 4. Strict adherence to memory constraints: no VLAs (using fixed-size buffers).
+             * 1. Validate argument count, argument length, and reject shell metacharacters.
+             * 2. If an absolute path is provided, verify it is within trusted system paths or /app
+             *    and execute directly via execve() with environ.
+             * 3. If a bare binary name is provided, verify it matches allowed binary names and resolve
+             *    only against trusted system paths (/usr/local/bin, /usr/bin, /bin, /usr/local/sbin, /usr/sbin)
+             *    with access(X_OK).
+             * 4. Eliminate unvalidated execvp fallback to prevent execution of untrusted or arbitrary binaries.
+             * 5. Strict adherence to memory constraints: no VLAs (using fixed-size buffers).
              */
+            {
+                char **arg_chk;
+                int arg_count = 0;
+                int arg_invalid = 0;
+
+                /* Validate all command arguments to eliminate command injection risks */
+                for (arg_chk = args; *arg_chk != NULL; arg_chk++) {
+                    size_t arg_len = strlen(*arg_chk);
+                    arg_count++;
+                    if (arg_count > 256 || arg_len > 4096) {
+                        arg_invalid = 1;
+                        break;
+                    }
+                    /* Disallow shell metacharacters and control characters */
+                    if (strpbrk(*arg_chk, ";|`$\n\r<>") != NULL) {
+                        arg_invalid = 1;
+                        break;
+                    }
+                }
+
+                if (arg_invalid) {
+                    static const char err_sec[] = "exec error: rejected argument containing prohibited characters\n";
+                    ngx_write_fd(STDERR_FILENO, (void *) err_sec, sizeof(err_sec) - 1);
+                    exit(1);
+                }
+            }
+
             {
                 extern char **environ;
                 static const char *trusted_dirs[] = {
@@ -859,16 +889,53 @@ ngx_rtmp_exec_run(ngx_rtmp_exec_t *e)
                     "/bin",
                     "/usr/local/sbin",
                     "/usr/sbin",
+                    "/app",
+                    NULL
+                };
+                static const char *allowed_binaries[] = {
+                    "ffmpeg",
+                    "ffprobe",
+                    "mediamtx",
+                    "flvmeta",
+                    "python3",
+                    "bash",
+                    "sh",
                     NULL
                 };
                 char resolved_path[1024];
                 const char *cmd_name = (const char *) ec->cmd.data;
                 const char **dir;
+                const char **allowed;
+                int is_allowed_name = 0;
                 int executed = 0;
 
+                /* Restrict executable base name to allowed streaming and system utilities */
+                const char *base_name = strrchr(cmd_name, '/');
+                base_name = (base_name != NULL) ? base_name + 1 : cmd_name;
+                for (allowed = allowed_binaries; *allowed != NULL; allowed++) {
+                    if (strcmp(base_name, *allowed) == 0) {
+                        is_allowed_name = 1;
+                        break;
+                    }
+                }
+
+                if (!is_allowed_name) {
+                    static const char err_unauth[] = "exec error: unauthorized command binary\n";
+                    ngx_write_fd(STDERR_FILENO, (void *) err_unauth, sizeof(err_unauth) - 1);
+                    exit(1);
+                }
+
                 if (cmd_name[0] == '/') {
-                    /* Absolute path specified: execute directly via execve */
-                    if (access(cmd_name, X_OK) == 0) {
+                    /* Absolute path specified: verify it is within trusted directories */
+                    int trusted_path = 0;
+                    for (dir = trusted_dirs; *dir != NULL; dir++) {
+                        size_t dlen = strlen(*dir);
+                        if (strncmp(cmd_name, *dir, dlen) == 0 && cmd_name[dlen] == '/') {
+                            trusted_path = 1;
+                            break;
+                        }
+                    }
+                    if (trusted_path && access(cmd_name, X_OK) == 0) {
                         execve(cmd_name, args, environ);
                     }
                 } else if (strchr(cmd_name, '/') == NULL) {
@@ -891,8 +958,11 @@ ngx_rtmp_exec_run(ngx_rtmp_exec_t *e)
                     }
                 }
 
+                /* If not executed in trusted directories, do NOT fall back to arbitrary execvp */
                 if (!executed) {
-                    execvp((char *) ec->cmd.data, args);
+                    static const char err_notfound[] = "exec error: binary not found in trusted directories\n";
+                    ngx_write_fd(STDERR_FILENO, (void *) err_notfound, sizeof(err_notfound) - 1);
+                    exit(1);
                 }
             }
 

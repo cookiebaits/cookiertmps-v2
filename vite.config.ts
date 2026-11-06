@@ -3,6 +3,19 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
+
+// Timing-safe string comparison to prevent timing attacks
+function timingSafeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    // Perform dummy constant-time comparison to avoid length timing leakage
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 // Cache for YouTube video IDs by channel handle to reduce YouTube requests
 const ytVideoIdCache: Record<string, { videoId: string; timestamp: number }> = {};
@@ -19,8 +32,11 @@ export default defineConfig({
         let activePushers: string[] = [];
         let webUiDisabled = true;
         const mockObsKey = 'cookiepass';
-        const isAuthorized = (req: { headers: Record<string, string | string[] | undefined> }) =>
-          req.headers['x-stream-key'] === mockObsKey;
+        const isAuthorized = (req: { headers: Record<string, string | string[] | undefined> }) => {
+          const headerKey = req.headers['x-stream-key'];
+          const keyStr = typeof headerKey === 'string' ? headerKey : (Array.isArray(headerKey) ? headerKey[0] || '' : '');
+          return timingSafeCompare(keyStr, mockObsKey);
+        };
 
         server.middlewares.use(async (req, res, next) => {
           const url = req.url || '';
@@ -339,7 +355,7 @@ export default defineConfig({
                 const key = params.get('name') || '';
                 const appName = params.get('app') || 'live';
                 
-                if (key === mockObsKey) {
+                if (timingSafeCompare(key, mockObsKey)) {
                   if (appName === 'live' && !activePushers.includes('horizontal')) {
                     activePushers.push('horizontal');
                   }
@@ -379,7 +395,7 @@ export default defineConfig({
                 try {
                   const data = JSON.parse(body || '{}');
                   const password = (data.password || '').trim();
-                  if (password === mockObsKey) {
+                  if (timingSafeCompare(password, mockObsKey)) {
                     res.setHeader('Content-Type', 'application/json');
                     res.end(JSON.stringify({ success: true }));
                   } else {

@@ -7,10 +7,13 @@ The relay never disconnects while a session is active: when the feed stops
 If the source does not recover within the timeout, the relay is stopped and
 the platforms see the broadcast end.
 """
+import ipaddress
 import json
 import logging
 import os
+import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -38,6 +41,8 @@ MTX_CONFIG = os.getenv("MEDIAMTX_CONFIG", "/etc/mediamtx.yml")
 MTX_RTMP_PORT = int(os.getenv("MEDIAMTX_RTMP_PORT", "1937"))
 MTX_API_PORT = int(os.getenv("MEDIAMTX_API_PORT", "9997"))
 DEFAULT_VIDEO_URL = "https://filedn.com/lfh40bKbFfD5um9HDFNrJFR/brb.mp4"
+
+ALLOWED_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 def update_prep_status(percent, stage, detail=""):
     try:
@@ -77,7 +82,15 @@ def is_valid_file(path):
 
 
 def http_get(url, timeout=3):
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "CookieRTMPS"}), timeout=timeout) as r:
+    """Internal HTTP query restricted to allowlisted local services (127.0.0.1, localhost, ::1)."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Prohibited scheme for internal request: {parsed.scheme}")
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in ALLOWED_LOCAL_HOSTS:
+        raise ValueError(f"Access to host '{hostname}' is not permitted by security policy (allowlist only).")
+    req = urllib.request.Request(url, headers={"User-Agent": "CookieRTMPS"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
@@ -123,6 +136,33 @@ def probe_has_stream(path, kind):
     return res.returncode == 0 and bool(res.stdout.strip())
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        log.warning(f"Security: Blocked redirect attempt to '{newurl}'")
+        return None
+
+
+def validate_remote_media_url(url):
+    """Mitigate SSRF: validate URL format and ensure destination does not resolve to private/local IPs."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Prohibited scheme '{parsed.scheme}'. Only http and https are permitted.")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL must have a valid hostname.")
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addr_info = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+        for _, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip_obj = ipaddress.ip_address(ip_str)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast or ip_obj.is_reserved:
+                raise ValueError(f"Access to private/local network address '{ip_str}' is prohibited.")
+    except socket.gaierror as e:
+        raise ValueError(f"Could not resolve host '{hostname}': {e}")
+
+
 def ensure_source_video(url):
     update_prep_status(10, "Verifying backup video source", url)
     source = os.path.join(DATA_DIR, "brb_source.mp4")
@@ -144,15 +184,30 @@ def ensure_source_video(url):
     log.info(f"Downloading backup video from {url}")
     tmp = source + ".download"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as out:
+        validate_remote_media_url(url)
+        opener = urllib.request.build_opener(NoRedirectHandler)
+        req = urllib.request.Request(url, headers={"User-Agent": "CookieRTMPS/1.0"})
+        max_bytes = 50 * 1024 * 1024  # 50MB max limit to prevent disk exhaustion
+        downloaded = 0
+        header_checked = False
+
+        with opener.open(req, timeout=30) as r, open(tmp, "wb") as out:
             while True:
                 chunk = r.read(1 << 20)
                 if not chunk:
                     break
+                downloaded += len(chunk)
+                if downloaded > max_bytes:
+                    raise ValueError("Backup video exceeds maximum allowed size (50MB)")
+                if not header_checked:
+                    # Validate MP4 box signature ('ftyp') in initial bytes
+                    if len(chunk) >= 12 and b"ftyp" not in chunk[:16]:
+                        raise ValueError("Downloaded file does not match expected MP4 container signature")
+                    header_checked = True
                 out.write(chunk)
+
         if not probe_has_stream(tmp, "v"):
-            raise ValueError("downloaded file has no video track")
+            raise ValueError("Downloaded file has no valid video stream")
         os.replace(tmp, source)
         with open(url_file, "w") as f:
             f.write(url)
@@ -269,8 +324,31 @@ def read_ingest_streams(apps):
     return found
 
 
+ALLOWED_BINARIES = {"ffmpeg", "ffprobe", "mediamtx"}
+
+
 class Proc:
     def __init__(self, label, cmd):
+        # Input verification and sanitization
+        if not isinstance(label, str) or not re.match(r'^[a-zA-Z0-9_-]+$', label):
+            raise ValueError(f"Invalid process label: {label}")
+        if not isinstance(cmd, (list, tuple)) or not cmd:
+            raise ValueError("Command must be a non-empty list of arguments")
+
+        exe = cmd[0]
+        exe_base = os.path.basename(exe)
+        is_trusted = (
+            exe_base in ALLOWED_BINARIES or
+            (os.path.isabs(exe) and os.path.isfile(exe) and os.access(exe, os.X_OK)) or
+            bool(os.path.isfile(f"/usr/bin/{exe_base}") or os.path.isfile(f"/usr/local/bin/{exe_base}"))
+        )
+        if not is_trusted:
+            raise ValueError(f"Command executable '{exe}' is not authorized by security policy")
+
+        for arg in cmd:
+            if not isinstance(arg, str) or '\0' in arg:
+                raise ValueError("Command arguments must be clean non-null strings")
+
         self.label = label
         log_path = f"/tmp/protection_{label}.log"
         self.log_file = open(log_path, "a")
@@ -302,6 +380,7 @@ class Channel:
         self.s = settings
         self.protected = protected
         self.state = "idle"
+        self.starting_since = None
         self.feed = None
         self.relay = None
         self.stream_name = None
@@ -334,16 +413,7 @@ class Channel:
     # --- processes
     def feed_cmd(self):
         src = f"{NGINX_RTMP}/{self.ingest_app}/{self.stream_name}"
-        if not self.protected:
-            return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
-                    "-analyzeduration", "3000000", "-probesize", "3000000",
-                    "-fflags", "+genpts",
-                    "-rw_timeout", "15000000", "-i", src,
-                    "-map", "0:v:0?", "-map", "0:a:0?",
-                    "-c:v", "copy",
-                    "-c:a", "copy",
-                    "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
-                    "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
+        dest = f"{NGINX_RTMP}/{self.output_app}/{self.orientation}" if not self.protected else f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}"
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
                 "-analyzeduration", "3000000", "-probesize", "3000000",
                 "-fflags", "+genpts",
@@ -353,17 +423,19 @@ class Channel:
                 "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
                 "-af", "aresample=async=1000",
                 "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
-                "-f", "flv", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}"]
+                "-f", "flv", dest]
 
     def relay_cmd(self):
         return ["ffmpeg", "-hide_banner", "-loglevel", "warning",
                 "-analyzeduration", "3000000", "-probesize", "3000000",
-                "-fflags", "+genpts",
+                "-fflags", "+genpts+igndts",
+                "-avoid_negative_ts", "make_zero",
                 "-rw_timeout", "15000000",
                 "-i", f"rtmp://127.0.0.1:{MTX_RTMP_PORT}/feed/{self.orientation}",
                 "-map", "0:v:0?", "-map", "0:a:0?",
                 "-c:v", "copy",
-                "-c:a", "copy",
+                "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+                "-af", "aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
                 "-flvflags", "no_duration_filesize", "-max_muxing_queue_size", "8192",
                 "-f", "flv", f"{NGINX_RTMP}/{self.output_app}/{self.orientation}"]
 
@@ -396,11 +468,22 @@ class Channel:
         if self.state == "idle":
             if present:
                 self.start_feed()
+                self.state = "starting"
+                self.starting_since = now
+                self.low_count = 0
+                self.event(f"Stream received ({kbps if kbps is not None else 'starting'} kbps). Initializing feed...")
+            return
+
+        if self.state == "starting":
+            if not present:
+                self.end_session("Stream disconnected during startup.")
+                return
+            # Give feed 1.0 second to establish connection to MediaMTX before relay connects
+            if now - (self.starting_since or now) >= 1.0:
                 if self.protected:
                     self.start_relay()
                 self.state = "live"
-                self.low_count = 0
-                self.event(f"Stream received ({kbps if kbps is not None else 'starting'} kbps). Broadcasting to platforms.")
+                self.event(f"Broadcasting to platforms ({kbps if kbps is not None else 'live'} kbps).")
             return
 
         if self.protected and self.relay and not self.relay.alive():
@@ -449,6 +532,7 @@ class Channel:
         self.stop_feed()
         self.state = "backup"
         self.backup_since = time.time()
+        self.starting_since = None
         self.good_count = 0
         self.event(f"{reason} Playing backup video for up to {self.s.timeout} seconds.", logging.WARNING)
 
@@ -457,11 +541,13 @@ class Channel:
         self.stop_relay()
         self.state = "idle"
         self.backup_since = None
+        self.starting_since = None
         self.event(reason, logging.WARNING)
 
     def status(self, now):
+        reported_state = "live" if self.state == "starting" else self.state
         return {
-            "state": self.state,
+            "state": reported_state,
             "kbps": self.kbps,
             "backupElapsed": int(now - self.backup_since) if self.backup_since else 0,
             "lastEvent": self.last_event,
